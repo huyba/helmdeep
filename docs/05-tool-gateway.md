@@ -92,7 +92,7 @@ Default-deny. The sandbox has no route to the internet; the gateway does, and on
 | Payload inspection | DLP scan outbound: PII/secrets/data-class violation → block or redact per policy |
 | Size & rate | Per-tool caps; global per-session egress byte budget (an exfiltration circuit breaker) |
 | Protocol | HTTPS only; no arbitrary sockets; websockets only for explicitly approved tools |
-| Blocked always | Cloud metadata endpoints, internal admin planes, the AgentOS control plane itself |
+| Blocked always | Cloud metadata endpoints, internal admin planes, the HelmDeep control plane itself |
 
 **Egress byte budget** deserves emphasis: even a perfectly authorized agent should not be able to stream a database out through a legitimate tool. A per-session cumulative outbound budget, with anomaly detection against the agent's historical baseline, catches the "authorized but abusive" case that policy alone misses.
 

@@ -1,4 +1,4 @@
-# AgentOS — Trusted Agent Runtime Platform for the Enterprise
+# HelmDeep — Trusted Agent Runtime Platform for the Enterprise
 ## Document 00 — Overview & Master Index
 
 **Status:** Design draft v1
@@ -20,7 +20,7 @@ Concretely, when an enterprise moves from "one chatbot" to "300 agents acting ac
 5. **No graduated autonomy.** Today it is binary: either a human approves every action (no value) or the agent is fully autonomous (unacceptable risk).
 6. **Zero observability.** When an agent produces a wrong outcome, teams cannot answer: which model version, which context, which tool call, which policy allowed it, and what would have happened otherwise.
 
-**AgentOS is the runtime and control plane that solves these six.** It is not an agent framework and not a model provider. It is the layer between them and the enterprise.
+**HelmDeep is the runtime and control plane that solves these six.** It is not an agent framework and not a model provider. It is the layer between them and the enterprise.
 
 ---
 
@@ -59,7 +59,7 @@ This design pursues **A + B together**: cloud-neutral control plane, deep runtim
 
 ## 3. Personas
 
-| Persona | Role | What they need from AgentOS | Primary KPI |
+| Persona | Role | What they need from HelmDeep | Primary KPI |
 |---|---|---|---|
 | **Ana — Agent Developer** | App/ML engineer in a business unit | SDK, local emulator, fast deploy, traces, evals | Time-to-first-production-agent |
 | **Raj — Platform Engineer** | Central platform team | Multi-tenancy, quotas, capacity, upgrades, on-call | Platform SLO, cost/agent-hour |

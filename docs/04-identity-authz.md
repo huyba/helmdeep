@@ -13,7 +13,7 @@ Four principal types, all first-class:
 | **Human** | `user:marcus@corp.com` | Enterprise IdP (OIDC) | Session-bound |
 | **Agent Definition** | `agent:invoice_recon` | Agent Registry | Permanent (versioned) |
 | **Agent Instance** | `agent_instance:ai_01J...` (one running session) | Runtime, at session start | Session-bound, minutes–hours |
-| **Workload** | `spiffe://agentos/runtime/us-west-2/node-17` | SPIRE | Rotating (hours) |
+| **Workload** | `spiffe://helmdeep/runtime/us-west-2/node-17` | SPIRE | Rotating (hours) |
 
 **Key idea:** authorization decisions are made against the *agent instance*, evaluated in the context of its **delegation chain**, not against a shared service account.
 
@@ -36,7 +36,7 @@ At session start, the runtime attests the sandbox (workload identity via SPIRE, 
     "trust_level": 2,
     "residency": "us"
   },
-  "aud": "agentos-gateways",
+  "aud": "helmdeep-gateways",
   "exp": "<= 15 min, refreshed by runtime while session live>"
 }
 ```

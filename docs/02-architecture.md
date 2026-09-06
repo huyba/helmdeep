@@ -4,7 +4,7 @@
 
 ## 1. Architectural Model
 
-AgentOS separates into **four planes**. This split is the backbone of the design: it determines failure isolation, deployment topology, and what a regulated customer can keep inside their own network.
+HelmDeep separates into **four planes**. This split is the backbone of the design: it determines failure isolation, deployment topology, and what a regulated customer can keep inside their own network.
 
 | Plane | Owns | Failure semantics |
 |---|---|---|

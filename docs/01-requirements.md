@@ -92,10 +92,10 @@ A "new enterprise customer onboarding" workflow spans a contract agent (legal do
 ## 4. Key User Journeys
 
 ### J1 — Ana ships her first agent (target: < 1 day)
-1. `agentos init` scaffolds `agent.yaml` + handler.
+1. `helmdeep init` scaffolds `agent.yaml` + handler.
 2. She declares tools from the **Tool Registry** (`salesforce.read_account`, `kb.search`) — the registry shows required scopes and data classes.
-3. `agentos dev` runs locally against the emulator; tool calls proxy through the real gateway with her own delegated identity, so she sees actual permission errors early.
-4. `agentos deploy --env staging` produces an immutable version, runs the eval suite, publishes a scorecard.
+3. `helmdeep dev` runs locally against the emulator; tool calls proxy through the real gateway with her own delegated identity, so she sees actual permission errors early.
+4. `helmdeep deploy --env staging` produces an immutable version, runs the eval suite, publishes a scorecard.
 5. Trust Engine assigns **Level 0 (Observe)**: agent runs but all writes are simulated and diffed.
 6. After 200 sessions with ≥95% human agreement, it is eligible for **Level 1**; Marcus (business owner) approves promotion in one click.
 
