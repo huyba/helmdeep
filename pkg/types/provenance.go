@@ -18,11 +18,11 @@ type Provenance struct {
 	// ("inbound_email", "web_content", "tool_output"), or "user_input" for
 	// something the invoking human typed directly. The vocabulary is
 	// defined by policy, not by this type.
-	Source string
+	Source string `json:"source"`
 	// Trusted is the gateway's own classification of Source, decided by
 	// configuration (which sources are trusted) rather than by anything the
 	// agent or model asserts about itself.
-	Trusted bool
+	Trusted bool `json:"trusted"`
 }
 
 // Value is a tool-call argument together with the provenance of where it
@@ -31,6 +31,6 @@ type Provenance struct {
 // user input — so the PDP can evaluate taint policy by reading a label
 // rather than re-deriving lineage itself.
 type Value struct {
-	Data       any
-	Provenance Provenance
+	Data       any        `json:"data"`
+	Provenance Provenance `json:"provenance"`
 }

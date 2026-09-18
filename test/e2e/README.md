@@ -1,6 +1,18 @@
 # End-to-end tests
 
-Placeholder. Step 2 will add at least one end-to-end test here that runs
-`helmdeep-gateway` against a mock upstream MCP server and asserts on a full
-`tools/list` → `tools/call` round trip, including a policy denial and a
-`verify-chain` check on the resulting audit log.
+`gateway_test.go` runs a fully wired Tool Gateway — real HTTP, the actual
+`examples/policies/` bundle, a real hash-chained audit log
+(`pkg/audit.FileStore` against a temp file), and four
+`internal/mockupstream` fixtures standing in for real systems — exactly as
+an unmodified MCP client would, over the wire (correct headers, correct
+`_meta`, no shortcuts).
+
+```sh
+go test ./test/e2e/... -v
+```
+
+Covers: `tools/list` filtered by scope, a scope-based deny, an
+unknown-tool protocol error, the taint policy allowing a trusted-sourced
+value and denying an email-sourced one, the aggregate rate limit tripping
+after its threshold, an unresolved-credential deny, and a final
+`Verify()` over the resulting audit log.

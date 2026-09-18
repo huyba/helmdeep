@@ -46,10 +46,19 @@ directly in the gateway binary.
 - **Native Go.** OPA is written in Go and its `rego` package is designed to
   be embedded as a library — this is the common case for OPA, not a
   workaround. No CGO, no FFI, no second toolchain in the build.
-- **Mature and boring.** OPA has years of production use as an embedded
-  authorization engine (Envoy, Kubernetes admission control, Kong, etc.).
-  For a security component "read by strangers," boring and widely-audited
-  beats novel.
+- **Mature and boring.** OPA is a CNCF project with years of production use
+  as an embedded authorization engine (Envoy, Kubernetes admission control,
+  Kong, etc.). For a security component "read by strangers," boring and
+  widely-audited beats novel. Embedding via `rego.PrepareForEval` is a
+  well-worn path, not something we're pioneering, and `opa test` gives us
+  policy unit testing for free — we don't have to build a policy test
+  harness alongside the policy language.
+- **Ecosystem fit for the target user.** This gateway's buyer runs agents on
+  Kubernetes. Many of those users already know Rego from Gatekeeper/OPA
+  admission control in the same clusters. Cedar's syntax is arguably
+  cleaner in isolation, but it's unfamiliar to this specific audience.
+  Choosing OPA means choosing the policy language the users already speak,
+  which matters more for adoption than syntactic elegance.
 - **Expressive enough for all three policy shapes.** Rego is a general
   Datalog-family language; scope rules, taint propagation checks, and
   threshold comparisons against supplied counters are all straightforward
@@ -57,6 +66,34 @@ directly in the gateway binary.
 - **Hot reload fits our model.** OPA supports loading a compiled policy
   bundle and swapping it atomically, which maps directly onto
   `policy.Loader.Reload` without us inventing our own bundle format.
+
+## Alternative also considered: CEL
+
+[CEL](https://github.com/google/cel-go) (`cel-go`) is pure Go, no CGO, and
+is what Kubernetes `ValidatingAdmissionPolicy` uses — a real point in its
+favor for the same Kubernetes-native audience OPA appeals to. Rejected
+anyway: CEL is an expression language, not a policy framework. It evaluates
+one boolean (or CEL-typed) expression against an input; it has no native
+concept of a policy *bundle*, precedence between rules, or a structured
+decision object with obligations. Getting from "one CEL expression" to "a
+combinable, hot-reloadable set of scope/taint/limit rules that produce an
+`allow` / `deny` / `allow_with_obligations` decision with a policy ID and
+reason" means building that structure ourselves in Go around CEL's
+evaluator — which is close enough to writing a policy engine that it fails
+the task's explicit constraint ("do not write a policy engine"). Rego
+already *is* that structure.
+
+## Implementation requirement: compile once, not per request
+
+Policies are compiled with `rego.PrepareForEval` once, at load and on each
+hot reload, and the resulting prepared query is reused for every
+evaluation. The gateway does **not** parse or compile Rego on the request
+path — doing so would alone be enough to miss the sub-5ms decision-latency
+target (`ROADMAP.md`), independent of anything else the request handler
+does. `pkg/policy`'s OPA-backed `Decider` holds the prepared query behind a
+mutex that's only taken to swap it during `Reload`; `Decide` calls read the
+current prepared query without blocking on reload except for the instant of
+the swap itself.
 
 ## Consequences
 

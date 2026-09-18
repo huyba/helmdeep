@@ -1,25 +1,141 @@
 # HelmDeep
 
-A policy enforcement gateway for AI agent tool calls, and — longer-term — a
-trusted, secure, and governed runtime environment for enterprises to build,
-deploy, and orchestrate AI agents at scale.
+An open-source policy enforcement gateway for AI agent tool calls — and,
+longer-term, a trusted runtime environment for enterprises to build,
+deploy, and orchestrate AI agents at scale. This repo currently implements
+one piece of that: the **Tool Gateway**.
 
-**Status: pre-alpha, Step 1 (scaffold and architecture).** Nothing here
-enforces policy yet. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the
-component decomposition and [`ROADMAP.md`](ROADMAP.md) for what's actually
-being built and in what order. A usage README with a quickstart lands once
-the Tool Gateway (Step 2) is implemented.
+**Status: working, pre-1.0.** The Tool Gateway is implemented and tested
+(unit, end-to-end, benchmarked). Everything else — identity & credential
+exchange, the Model Gateway, the sandbox runtime, the scheduler, the control
+plane — is an interface-only stub. See [`ARCHITECTURE.md`](ARCHITECTURE.md)
+for the full decomposition and [`ROADMAP.md`](ROADMAP.md) for what's next.
 
-## Why
+## Why enforcement has to sit outside the agent
 
-The model is not a security boundary: indirect prompt injection can make an
-agent attempt actions its operator never intended. The agent's own code is
-not a security boundary either: a compromised dependency can bypass any
-check that lives inside the agent process. So enforcement has to sit outside
-the agent, on a path it cannot route around — that's the Tool Gateway this
-repo is building. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full
-argument and [`docs/`](docs/) for the platform-level design this component
-implements a piece of.
+The model is not a security boundary: indirect prompt injection — text in a
+fetched web page, an email, a document the agent reads — can make an agent
+attempt actions its operator never intended. The agent's own code is not a
+security boundary either: a compromised dependency can bypass any check
+that lives inside the agent process. If the policy check runs *inside* the
+same process an attacker can already influence, it isn't a check.
+
+So enforcement has to sit outside the agent, on a path it cannot route
+around. HelmDeep's Tool Gateway speaks MCP to the agent — the agent believes
+it's talking directly to the real tool servers — evaluates every
+`tools/call` against policy, records what it decided (allow or deny) in a
+tamper-evident log, and only then forwards the allowed ones upstream, using
+credentials the agent never holds. An agent fully hijacked by a malicious
+tool result still cannot do anything the gateway's policy hasn't
+authorized, because the authorization check isn't inside the process the
+injection controls.
+
+This targets the current MCP spec (2026-07-28, stateless) exclusively —
+see [ADR 0005](docs/adr/0005-mcp-protocol-compatibility.md) for why
+supporting the prior session-based protocol alongside it was rejected: two
+ways to resolve caller identity inside a policy enforcement point is a
+bypass waiting to happen, not a compatibility feature. **Statelessness here
+is a scalability property of the protocol, not a security one** — the
+security property that matters (identity resolved fresh, from a source the
+gateway controls, on every single request) was achievable under the old
+spec too. What the new spec removes is the temptation to do it any other
+way.
+
+## Quickstart
+
+```sh
+cd examples/quickstart
+docker compose up --build
+```
+
+Five minutes to a policy allow, a scope-based deny, and a taint-based deny
+against mock upstream systems — see
+[`examples/quickstart/README.md`](examples/quickstart/README.md) for the
+full walkthrough with `curl` commands.
+
+## A worked policy example
+
+Three policy types, one combined decision — see
+[`docs/policy-guide.md`](docs/policy-guide.md) for the full input contract
+and [`examples/policies/`](examples/policies/) for the actual bundle.
+
+**Scope** — which tools an agent may call:
+
+```rego
+allowed_tools := {
+	"agent:support-bot": {"kb.search"},
+	"agent:finance-bot": {"supplier.get_account", "email.read_latest", "payments.wire_transfer"},
+}
+
+scope_allowed if { input.action.tool in allowed_tools[input.subject.id] }
+```
+
+**Provenance / taint** — a wire transfer's account number must derive from
+the supplier master record, never from an inbound email, regardless of who's
+asking:
+
+```rego
+tainted_requirements := {"payments.wire_transfer": {"argument": "account_number"}}
+
+taint_violation if {
+	req := tainted_requirements[input.action.tool]
+	arg := input.action.arguments[req.argument]
+	not arg.provenance.trusted
+}
+```
+
+The gateway derives that `provenance.trusted` label itself, from having
+directly observed which upstream produced the value — it never trusts the
+agent's own claim about where a value came from (a prompt-injected agent
+would just lie). See `internal/gateway/provenance.go` and
+`docs/policy-guide.md`.
+
+**Aggregate limits** — call-rate ceilings, using a counter the gateway
+maintains and the policy only reads:
+
+```rego
+rate_limits := {"kb.search": 3}
+
+limit_exceeded if {
+	limit := rate_limits[input.action.tool]
+	input.context.usage.calls_in_window > limit
+}
+```
+
+Run `go test ./pkg/policy/... -run TestExamplePolicies -v` to see all three
+exercised together, or `go test ./test/e2e/...` to see them exercised over
+real HTTP against mock upstream servers.
+
+## Performance
+
+`go test ./pkg/policy/... -run '^$' -bench BenchmarkDecide -benchmem`
+measures the number that actually matters — added latency of one policy
+decision against the real, loaded three-policy-type bundle above, not the
+surrounding HTTP/JSON overhead:
+
+```text
+BenchmarkDecide-10    32653    74094 ns/op    30880 B/op    623 allocs/op
+```
+
+~74µs per decision on an Apple M1 Max — well inside the sub-5ms target
+(`ROADMAP.md`). This is the policy evaluation cost in isolation; total
+request latency also includes HTTP parsing, identity resolution, the audit
+write, and the upstream call, which this benchmark deliberately excludes so
+the number stays meaningful as those other pieces change.
+
+## Dependencies and binary size
+
+Two direct dependencies: `github.com/open-policy-agent/opa` (the embedded
+Rego evaluator — see [ADR 0002](docs/adr/0002-policy-engine-choice.md)) and
+`sigs.k8s.io/yaml` (config parsing, which adds *zero* net dependency surface
+— it's already compiled in because OPA's own Rego builtins use it). No CGO,
+no OPA server, no OPA CLI: only the `rego` evaluation package is imported.
+
+The static `linux/amd64` binary is **~23MB**, `-trimpath -ldflags="-s -w"`.
+Most of that is OPA's `topdown` evaluator and its built-in function library
+(JWT, glob, SQL, GraphQL builtins are registered unconditionally, whether or
+not your policies use them) — a known, real cost of embedding OPA, stated
+here rather than glossed over.
 
 ## Repo layout
 
@@ -28,13 +144,26 @@ implements a piece of.
 - `docs/adr/` — architecture decision records
 - `docs/` — the platform-level design documents (00–15) this repo implements
   against, plus this component's own docs (`threat-model.md`, `policy-guide.md`)
-- `pkg/` — the shared contracts (`types`) and component interfaces
-- `internal/gateway`, `cmd/helmdeep-gateway` — the Tool Gateway (Step 2)
+- `pkg/types` — shared contracts every component depends on
+- `pkg/mcp` — the MCP wire protocol (JSON-RPC, `_meta`, headers, transport)
+- `pkg/policy`, `pkg/audit` — the PDP and the hash-chained audit log
+- `pkg/identity`, `pkg/modelgw`, `pkg/sandbox`, `pkg/scheduler`, `pkg/controlplane` — interface-only stubs, not implemented
+- `internal/gateway` — the Tool Gateway's business logic
+- `cmd/helmdeep-gateway` — the product binary
+- `internal/mockupstream`, `cmd/mock-upstream` — test/demo fixtures, not part of the product
+- `examples/policies`, `examples/quickstart` — the worked example above, runnable
+- `test/e2e` — end-to-end tests against the fixtures above
 
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) — in particular, the component
 status table there before starting work on anything under `pkg/`.
+
+## Security
+
+See [`SECURITY.md`](SECURITY.md) for the vulnerability reporting process
+and an explicit statement of what this gateway does and does not defend
+against.
 
 ## License
 

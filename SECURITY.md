@@ -30,7 +30,7 @@ lines receive security fixes.
 
 ## What this project defends against (today)
 
-As of Phase 1 (the Tool Gateway — see `ROADMAP.md`), once implemented:
+As of Phase 1 (the Tool Gateway — see `ROADMAP.md`), implemented and tested:
 
 - An agent process fully compromised by indirect prompt injection or a
   malicious dependency attempting to call a tool, on a resource, or with
@@ -80,3 +80,10 @@ CI runs `govulncheck` on every build. Dependency count is kept deliberately
 small (see `docs/adr/0002-policy-engine-choice.md` for the one major
 dependency taken on so far and why) specifically to keep this surface
 reviewable.
+
+As of this writing, `govulncheck` reports one advisory
+(`golang.org/x/crypto`'s `openpgp` package being unmaintained) in OPA's
+transitive dependency tree, in code this gateway never calls (`govulncheck`
+confirms 0 reachable vulnerabilities in the actual call graph). Stated here
+rather than silently suppressed — see the CI run for the current, live
+status rather than trusting this paragraph as it ages.

@@ -1,0 +1,44 @@
+listen: ":8443"
+path: "/mcp"
+
+policy:
+  path: /etc/helmdeep/policies
+
+audit:
+  path: /data/audit.log
+
+# DEVELOPMENT ONLY — see internal/gateway/identity.go. A real deployment
+# replaces this whole section with a real identity provider once
+# pkg/identity has one; nothing else in this config changes when it does.
+identity:
+  static_tokens:
+    support-token:
+      id: agent:support-bot
+      kind: agent
+      trust_level: 0
+    finance-token:
+      id: agent:finance-bot
+      kind: agent
+      trust_level: 0
+
+upstreams:
+  - name: knowledgebase
+    url: http://kb:9000/mcp
+    provenance:
+      source: knowledgebase
+      trusted: false
+  - name: suppliermaster
+    url: http://supplier:9000/mcp
+    provenance:
+      source: suppliermaster
+      trusted: true
+  - name: email
+    url: http://email:9000/mcp
+    provenance:
+      source: email
+      trusted: false
+  - name: payments
+    url: http://payments:9000/mcp
+    provenance:
+      source: payments
+      trusted: false

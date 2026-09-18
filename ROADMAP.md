@@ -21,9 +21,11 @@ forbids, and a stranger can run `verify-chain` on the resulting audit log
 and see that it's intact.
 
 Scope:
-- MCP listener over Streamable HTTP and stdio, targeting the current
-  stateless spec (2026-07-28) with a legacy session-based compatibility
-  shim (see `docs/adr/0005-mcp-protocol-compatibility.md`)
+- MCP listener over Streamable HTTP, targeting the current stateless spec
+  (2026-07-28) exclusively, with only the minimal legacy tolerance the spec
+  itself prescribes for a modern-only server (see
+  `docs/adr/0005-mcp-protocol-compatibility.md`). stdio transport is not
+  implemented in Phase 1.
 - Embedded OPA/Rego PDP, hot-reloadable from a YAML/Rego policy bundle
 - File-backed, hash-chained audit store and a `verify-chain` command
 - A minimal static token→identity resolver, local to `internal/gateway`
@@ -72,3 +74,13 @@ Natural-language agent scaffolding, shadow-agent discovery, and a policy
 authoring GUI are platform-level ideas in `docs/`, not commitments for this
 repo. They'd only make sense once the phases above exist to generate
 scaffolding against, discover agents on top of, or author policy for.
+
+**Full legacy MCP protocol support** (2025-11-25 and earlier — the
+`initialize`-handshake, session-based era) is also a deliberate non-goal,
+not a gap to fill in a later phase by default. See
+`docs/adr/0005-mcp-protocol-compatibility.md`: supporting both eras means
+two paths for resolving caller identity inside the one component whose job
+is to get that exactly right, and this project has no user yet who's
+actually blocked by it. Revisit only if a real user reports a real agent
+framework that cannot migrate — the spec gives deprecated features a
+twelve-month runway, so there's no urgency to pre-build this.

@@ -29,9 +29,9 @@ const (
 // exists now so DecisionRequest and ActionRecord don't need a breaking
 // change when delegation lands.
 type Subject struct {
-	ID              string
-	Kind            SubjectKind
-	AgentVersion    string
-	DelegationChain []string
-	TrustLevel      int
+	ID              string      `json:"id"`
+	Kind            SubjectKind `json:"kind"`
+	AgentVersion    string      `json:"agent_version,omitempty"`
+	DelegationChain []string    `json:"delegation_chain,omitempty"`
+	TrustLevel      int         `json:"trust_level"`
 }

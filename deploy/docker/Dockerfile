@@ -1,17 +1,21 @@
-# Builds cmd/helmdeep-gateway as a static binary in a minimal image.
-#
-# As of Step 1 the binary is scaffold only (see ROADMAP.md) — this Dockerfile
-# exists so the release pipeline and `make docker` have something real to
-# build against from day one, not so there's a usable gateway image yet.
+# Builds cmd/helmdeep-gateway (the product) as a static binary in a minimal
+# image. The quickstart also uses this same Dockerfile to build
+# cmd/mock-upstream (a test fixture, not part of the product — see
+# internal/mockupstream) by overriding BUILD_PKG, so the demo doesn't need a
+# second Dockerfile to maintain.
 
-FROM golang:1.23-alpine AS build
+ARG BUILD_PKG=./cmd/helmdeep-gateway
+
+FROM golang:1.26-alpine AS build
+ARG BUILD_PKG
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/helmdeep-gateway ./cmd/helmdeep-gateway
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/app "${BUILD_PKG}"
 
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /out/helmdeep-gateway /usr/local/bin/helmdeep-gateway
+COPY --from=build /out/app /usr/local/bin/app
 USER nonroot:nonroot
-ENTRYPOINT ["/usr/local/bin/helmdeep-gateway"]
+ENTRYPOINT ["/usr/local/bin/app"]
 CMD ["serve"]

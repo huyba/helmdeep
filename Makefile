@@ -3,6 +3,7 @@ CMD        := ./cmd/helmdeep-gateway
 VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS    := -s -w -X main.version=$(VERSION)
 IMAGE      := helmdeep-gateway:$(VERSION)
+CONFIG     ?= config.yaml
 
 .PHONY: build
 build:
@@ -26,7 +27,7 @@ docker:
 
 .PHONY: verify-chain
 verify-chain: build
-	./bin/$(BINARY) verify-chain
+	./bin/$(BINARY) verify-chain -config=$(CONFIG)
 
 .PHONY: clean
 clean:

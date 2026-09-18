@@ -1,85 +1,123 @@
-# ADR 0005 — MCP protocol compatibility: support both the current and prior spec revisions
+# ADR 0005 — MCP protocol: target the current stateless spec only
 
 ## Context
 
-The MCP spec changed substantially seven weeks before this ADR was written.
-The current finalized revision, **2026-07-28**, made the protocol
-stateless: no `initialize`/`notifications/initialized` handshake, no
-`Mcp-Session-Id`, no server-push GET stream — every request carries its own
-protocol version and client identity in `_meta`
-(`io.modelcontextprotocol/protocolVersion`, `io.modelcontextprotocol/clientInfo`,
-`io.modelcontextprotocol/clientCapabilities`), and `tools/list` results may
-now vary by the authorization presented on that specific request rather than
-being fixed for the life of a connection. Servers must implement a new
-`server/discover` RPC for capability advertisement. The prior revision,
-**2025-11-25**, used the older session-based model most currently-deployed
-MCP clients and agent frameworks still speak, seven weeks being nowhere near
-enough time for the ecosystem to migrate.
+The MCP spec went stateless in the finalized **2026-07-28** revision: no
+`initialize`/`notifications/initialized` handshake, no `Mcp-Session-Id`,
+every request carries its own protocol version, client info, and
+capabilities in `_meta`. The prior revision, **2025-11-25** ("legacy" in the
+spec's own terminology), used a session established by an `initialize`
+handshake, and is what most currently-deployed MCP clients still speak.
 
-This is a real product-shaping trade-off, not a detail: it determines
-whether the gateway's `pkg/mcp.Listener` needs a session-state concept at
-all, and whether agents built against today's popular MCP clients can talk
-to it without modification — which is a hard requirement
-("framework-agnostic... no agent-side SDK required, no code changes in the
-agent").
+An earlier draft of this ADR chose to support both eras. That was wrong, and
+not for a code-volume reason.
 
 ## Decision
 
-Target the current stateless spec (2026-07-28) as the primary wire format,
-and implement a documented compatibility shim for the prior session-based
-protocol (2025-11-25 and earlier) so agents that haven't upgraded yet still
-work. `pkg/mcp.ProtocolVersionCurrent` and `pkg/mcp.ProtocolVersionLegacy`
-name the two revisions the `Listener` implementation (Step 2) must
-understand.
+Target the current stateless spec (2026-07-28) only. Implement the minimal
+legacy *tolerance* the spec itself prescribes for a modern-only server (see
+below) — not a legacy protocol implementation.
+
+**Exactly one identity path**: caller identity is derived from per-request
+`_meta` (`io.modelcontextprotocol/protocolVersion`,
+`io.modelcontextprotocol/clientCapabilities`) and the request's
+`Authorization` header. Never from a session. This is a hard invariant,
+tested explicitly (`internal/gateway/identity_test.go` asserts there is no
+code path that resolves identity from anything but the current request).
+
+## Why: this is a security argument, not a code-volume one
+
+This gateway uses caller identity as an input to every policy decision.
+"Support both eras" means two ways to resolve identity: one read fresh from
+`_meta` on every request, one established once at a legacy `initialize`
+handshake and then implicitly trusted for every subsequent request on that
+session. Two identity-resolution paths inside a Policy Enforcement Point is
+a classic source of confusion bugs — the two paths agreeing on the common
+case and diverging on some edge case (a session outliving the credential
+that created it, a session ID reused across a connection that changed
+peers, a race between session teardown and an in-flight request) is exactly
+the kind of gap an attacker looks for. In an ordinary API gateway, that
+divergence is a nuisance. In a PEP, it's a bypass: an attacker only needs
+the *cheaper* of the two identity paths to be wrong.
+
+Secondary arguments, worth stating but not decisive on their own:
+
+- This project has no users yet. A full legacy shim pays a real
+  implementation and testing cost for compatibility with a hypothetical
+  client, not a demonstrated one.
+- Supporting both eras roughly doubles the wire-protocol surface, and the
+  test plan would have to cover every deny path twice — once per era.
+
+## What "minimal legacy tolerance" means, concretely
+
+This is what the 2026-07-28 spec itself requires of a modern-only server —
+not a design choice we're adding on top:
+
+- No `Mcp-Session-Id` handling at all: if a legacy client sends the header,
+  ignore it. Never mint or echo a session ID.
+- HTTP `GET` or `DELETE` to the MCP endpoint → `405 Method Not Allowed`
+  (there's no GET stream or session to delete in this revision).
+- A legacy `initialize` request — which lacks the required
+  `_meta.io.modelcontextprotocol/protocolVersion` field and the
+  `MCP-Protocol-Version` / `Mcp-Method` headers this revision requires on
+  every POST — fails header/`_meta` validation like any other malformed
+  request (`400 Bad Request`, `HeaderMismatch` or Invalid Params as
+  appropriate) rather than crashing or being silently accepted. See the
+  spec's own compatibility matrix: "Legacy client, Modern server" is
+  documented as a failure case, and the guidance for a modern-only server is
+  to name its supported versions in the error so the legacy client's user
+  gets an actionable message instead of a mystery.
+
+None of this constitutes a second identity path. A legacy client simply
+gets a clean, correctly-coded rejection instead of being served.
 
 ## Alternatives considered
 
-- **Target only the current spec.** Smallest, most spec-correct surface
-  area — no session state to manage, `tools/list` filtering by per-request
-  credentials falls out of the stateless model almost for free, which fits
-  this gateway's threat model unusually well (every request re-proves who's
-  calling; there's no session to hijack or fixate). Rejected as the *only*
-  target: as of today, most real agent clients in the wild still speak the
-  session-based protocol, and rejecting them until they upgrade would mean
-  the gateway can't do its job — sit transparently in front of an agent
-  that speaks MCP — for the majority of agents that exist right now.
-- **Target only the prior, currently-dominant protocol.** Maximizes
-  compatibility with today's agents with less implementation work up front.
-  Rejected as the *only* target: it means shipping against a spec revision
-  that was already superseded before Step 2 was written, guaranteeing
-  rework, and it forfeits the stateless model's genuine architectural fit
-  for a policy gateway (per-request identity is *more* correct for this
-  use case than a long-lived session identity would be).
-- **Detect and negotiate per the spec's own documented backward-compatibility
-  matrix, dynamically, per connection/request.** This is close to what "support
-  both" means in practice and is not really a rejected alternative — it's
-  the shape the compatibility shim takes. Called out separately because it's
-  the part of this decision with the most implementation risk: detecting
-  which era a given client speaks (presence of `_meta.io.modelcontextprotocol/*`
-  fields vs. an `initialize` request; presence vs. absence of
-  `Mcp-Session-Id`) has to be exactly right, or a legitimate current-spec
-  client gets treated as legacy or vice versa. Step 2 must test both paths
-  explicitly, not just the one path development happens to exercise first.
+- **Support both eras (the original decision).** Rejected for the security
+  reason above.
+- **Target only the legacy protocol, treat statelessness as future work.**
+  Rejected: it means shipping against a spec revision already superseded,
+  guaranteeing rework, and it forfeits the stateless model's genuine fit for
+  a policy gateway — per-request identity resolution is architecturally
+  *more* correct for this threat model than a session ever was, not merely
+  newer.
+
+## Also adopted, because we're on the current spec
+
+- **`Mcp-Method` / `Mcp-Name` request headers are validated and used for
+  routing before the body is parsed.** These mirror `method` and
+  `params.name` into headers specifically so a gateway can route and filter
+  cheaply — directly useful for the sub-5ms latency target (`ROADMAP.md`).
+  The gateway validates header/body agreement per spec (`HeaderMismatch`,
+  `-32020`) rather than trusting either source alone.
+- **Server-minted state handles are ordinary tool arguments now**, not
+  transport state. Because of this, a handle is just another `arguments`
+  value and flows through `types.DecisionRequest` like any other parameter —
+  including provenance labeling. A handle an agent got from a prior tool
+  result carries that tool's provenance, not an implicit "trusted because
+  it's transport state" exemption. This is called out explicitly because
+  it's an easy thing to special-case by accident.
+
+## Recorded as a non-goal
+
+Full legacy (2025-11-25 and earlier) protocol support is a **deliberate
+non-goal** of this project — see `ROADMAP.md`. It is revisited only if a
+real user reports a real agent framework that cannot migrate. Context: the
+spec's own feature-lifecycle policy gives deprecated features a minimum
+twelve-month deprecation window, so the ecosystem has runway to move off the
+session-based model before this becomes a practical problem for anyone.
 
 ## Consequences
 
-- `pkg/mcp.Listener`'s Step 2 implementation is two request-handling paths
-  behind one interface, not one. This is more code than targeting a single
-  revision, mirroring the same two-tier tradeoff the platform design already
-  accepts elsewhere (see `docs/02-architecture.md` ADR-1, hybrid microVM +
-  pooled container) in exchange for not forcing a compatibility cost onto
-  every integrator.
-- Because the current spec's statelessness maps naturally onto "resolve
-  identity fresh on every request," the identity-resolution and
-  policy-decision code paths in `internal/gateway` should be written
-  session-agnostic from the start, with the legacy shim adapting *into*
-  that model (extracting an identity from the legacy session at each
-  request) rather than the reverse. Building the stateless path as primary
-  and the legacy path as an adapter, rather than the other way around, keeps
-  the code that will matter long-term from being contaminated by a
-  transitional compatibility concern.
-- This decision should be revisited once ecosystem adoption of 2026-07-28 is
-  clear (SDK Tier 1 support, per the spec's own release process, was
-  expected within ten weeks of the RC lock) — at that point the legacy shim
-  becomes a maintenance cost with shrinking benefit, and dropping it is a
-  deletion, not a redesign.
+- `pkg/mcp`'s implementation is one request-handling path, not two. Simpler
+  than the original decision, and it removes an entire class of "which era
+  is this client" detection logic that would otherwise need its own tests.
+- The README must not imply the new spec makes anything *more secure*.
+  Statelessness here is a scalability and implementation-simplicity change
+  in the protocol; the security property that matters — identity resolved
+  fresh, per request, from a source the gateway controls — was achievable
+  under the old spec too (bearer tokens were always per-request). What
+  changed is that the stateless model makes the *correct* design also the
+  *only* design, removing the temptation to cache identity on a connection.
+- A real user reporting a legacy-only framework is a product decision to
+  revisit this ADR, not a bug report against this implementation.

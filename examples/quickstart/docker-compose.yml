@@ -1,0 +1,30 @@
+services:
+  kb:
+    build: { context: ../../, dockerfile: deploy/docker/Dockerfile, args: { BUILD_PKG: ./cmd/mock-upstream } }
+    command: ["-profile=knowledgebase", "-addr=:9000"]
+
+  supplier:
+    build: { context: ../../, dockerfile: deploy/docker/Dockerfile, args: { BUILD_PKG: ./cmd/mock-upstream } }
+    command: ["-profile=suppliermaster", "-addr=:9000"]
+
+  email:
+    build: { context: ../../, dockerfile: deploy/docker/Dockerfile, args: { BUILD_PKG: ./cmd/mock-upstream } }
+    command: ["-profile=email", "-addr=:9000"]
+
+  payments:
+    build: { context: ../../, dockerfile: deploy/docker/Dockerfile, args: { BUILD_PKG: ./cmd/mock-upstream } }
+    command: ["-profile=payments", "-addr=:9000"]
+
+  gateway:
+    build: { context: ../../, dockerfile: deploy/docker/Dockerfile }
+    command: ["serve", "-config=/etc/helmdeep/config.yaml"]
+    volumes:
+      - ./config.yaml:/etc/helmdeep/config.yaml:ro
+      - ../policies:/etc/helmdeep/policies:ro
+    ports:
+      - "8443:8443"
+    depends_on:
+      - kb
+      - supplier
+      - email
+      - payments
