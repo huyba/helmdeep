@@ -152,8 +152,19 @@ func (g *Gateway) CallTool(ctx context.Context, cc mcp.CallContext, name string,
 		decision = types.DecisionResponse{Outcome: types.OutcomeDeny, PolicyID: "pdp.error", Reason: err.Error()}
 	}
 
+	// allowed is deliberately an allow-list, not `!= OutcomeDeny`: the zero
+	// value of types.Outcome is "", and an allow-list makes that — and any
+	// other value a Decider might return that isn't one of the two allow
+	// outcomes — deny by construction. A deny-list here would mean a
+	// Decider that returns a zero-value DecisionResponse on some
+	// unhandled branch gets treated as an allow, which is exactly the
+	// silent-vulnerability shape docs/adr/0003-fail-closed-behavior.md
+	// exists to rule out. See internal/gateway/gateway_test.go's
+	// TestZeroValueDecisionResponseIsDenied.
+	allowed := decision.Outcome == types.OutcomeAllow || decision.Outcome == types.OutcomeAllowWithObligations
+
 	recordOutcome := types.RecordOutcomeDenied
-	if decision.Outcome != types.OutcomeDeny {
+	if allowed {
 		recordOutcome = types.RecordOutcomeAllowed
 	}
 
@@ -170,7 +181,7 @@ func (g *Gateway) CallTool(ctx context.Context, cc mcp.CallContext, name string,
 		return deniedResult("could not durably record this decision, denying: " + err.Error()), nil
 	}
 
-	if decision.Outcome == types.OutcomeDeny {
+	if !allowed {
 		reason := decision.Reason
 		if reason == "" {
 			reason = "denied by policy"
