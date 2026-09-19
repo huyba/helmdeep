@@ -15,7 +15,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/huyba/helmdeep/internal/gateway"
@@ -31,7 +33,10 @@ const (
 	financeToken = "finance-token"
 )
 
-func startMockUpstream(t *testing.T, profile string) *httptest.Server {
+// startMockUpstream returns both the httptest server (for the gateway to
+// call) and the underlying *mockupstream.Server (so a test can inspect
+// what it actually received — see mockupstream.RecordedCall).
+func startMockUpstream(t *testing.T, profile string) (*httptest.Server, *mockupstream.Server) {
 	t.Helper()
 	h, err := mockupstream.NewHandler(profile)
 	if err != nil {
@@ -39,26 +44,43 @@ func startMockUpstream(t *testing.T, profile string) *httptest.Server {
 	}
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, h
+}
+
+// mockUpstreams holds a spy on every upstream in the standard test
+// topology, so tests can assert on what each one did or didn't receive.
+type mockUpstreams struct {
+	kb, supplier, email, payments *mockupstream.Server
 }
 
 // newTestGateway wires the same components a real deployment would — see
 // examples/quickstart/config.yaml, which this mirrors — and returns the
-// gateway's HTTP endpoint plus its audit store (so the test can call
-// Verify directly instead of shelling out to `verify-chain`).
-func newTestGateway(t *testing.T) (endpoint string, auditStore *audit.FileStore) {
+// gateway's HTTP endpoint, its audit store (so a test can call Verify
+// directly instead of shelling out to `verify-chain`), and a spy on each
+// mock upstream.
+func newTestGateway(t *testing.T) (endpoint string, auditStore *audit.FileStore, mocks mockUpstreams) {
+	t.Helper()
+	return newTestGatewayWithPolicy(t, mustAbs(t, "../../examples/policies"))
+}
+
+// newTestGatewayWithPolicy is newTestGateway with the policy bundle path as
+// a parameter, so a test that needs behavior the public example bundle
+// doesn't demonstrate (e.g. obligations/redaction) can point at its own
+// fixture under test/e2e/testdata/ instead.
+func newTestGatewayWithPolicy(t *testing.T, policyPath string) (endpoint string, auditStore *audit.FileStore, mocks mockUpstreams) {
 	t.Helper()
 
-	kb := startMockUpstream(t, "knowledgebase")
-	supplier := startMockUpstream(t, "suppliermaster")
-	email := startMockUpstream(t, "email")
-	payments := startMockUpstream(t, "payments")
+	kbTS, kb := startMockUpstream(t, "knowledgebase")
+	supplierTS, supplier := startMockUpstream(t, "suppliermaster")
+	emailTS, email := startMockUpstream(t, "email")
+	paymentsTS, payments := startMockUpstream(t, "payments")
+	mocks = mockUpstreams{kb: kb, supplier: supplier, email: email, payments: payments}
 
 	upstreams := []mcp.Upstream{
-		mcp.NewHTTPUpstream("knowledgebase", kb.URL, ""),
-		mcp.NewHTTPUpstream("suppliermaster", supplier.URL, ""),
-		mcp.NewHTTPUpstream("email", email.URL, ""),
-		mcp.NewHTTPUpstream("payments", payments.URL, ""),
+		mcp.NewHTTPUpstream("knowledgebase", kbTS.URL, ""),
+		mcp.NewHTTPUpstream("suppliermaster", supplierTS.URL, ""),
+		mcp.NewHTTPUpstream("email", emailTS.URL, ""),
+		mcp.NewHTTPUpstream("payments", paymentsTS.URL, ""),
 	}
 	registry, err := mcp.NewStaticRegistry(context.Background(), upstreams)
 	if err != nil {
@@ -66,12 +88,8 @@ func newTestGateway(t *testing.T) (endpoint string, auditStore *audit.FileStore)
 	}
 
 	pdp := policy.NewOPADecider()
-	policyPath, err := filepath.Abs("../../examples/policies")
-	if err != nil {
-		t.Fatalf("resolve policy path: %v", err)
-	}
 	if err := pdp.Load(policyPath); err != nil {
-		t.Fatalf("Load policy: %v", err)
+		t.Fatalf("Load policy %s: %v", policyPath, err)
 	}
 
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
@@ -90,13 +108,22 @@ func newTestGateway(t *testing.T) (endpoint string, auditStore *audit.FileStore)
 		"email":          {Source: "email", Trusted: false},
 	}
 
-	gw := gateway.New(resolver, pdp, auditStore, registry, provenance)
+	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0)
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
 
 	ts := httptest.NewServer(gwServer.Handler())
 	t.Cleanup(ts.Close)
 
-	return ts.URL + "/mcp", auditStore
+	return ts.URL + "/mcp", auditStore, mocks
+}
+
+func mustAbs(t *testing.T, path string) string {
+	t.Helper()
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("resolve path %s: %v", path, err)
+	}
+	return abs
 }
 
 // call sends one MCP request exactly as a conforming 2026-07-28 client
@@ -162,7 +189,7 @@ func resultOf(t *testing.T, resp map[string]any) map[string]any {
 }
 
 func TestToolsListIsFilteredByScope(t *testing.T) {
-	endpoint, _ := newTestGateway(t)
+	endpoint, _, _ := newTestGateway(t)
 
 	resp := call(t, endpoint, supportToken, "tools/list", "", nil)
 	result := resultOf(t, resp)
@@ -179,7 +206,7 @@ func TestToolsListIsFilteredByScope(t *testing.T) {
 }
 
 func TestScopeDenyForOutOfScopeTool(t *testing.T) {
-	endpoint, _ := newTestGateway(t)
+	endpoint, _, mocks := newTestGateway(t)
 
 	resp := callTool(t, endpoint, supportToken, "payments.wire_transfer", map[string]any{
 		"account_number": "ACC-TRUSTED-0001", "amount_usd": 100,
@@ -188,10 +215,32 @@ func TestScopeDenyForOutOfScopeTool(t *testing.T) {
 	if isErr, _ := result["isError"].(bool); !isErr {
 		t.Fatalf("expected isError=true for an out-of-scope tool call, got %v", result)
 	}
+
+	// The strong form of "denied": not just that the agent got an error,
+	// but that the payments upstream was never asked to execute the tool.
+	// (NewStaticRegistry does call tools/list on every upstream once at
+	// startup to build its catalog — that's routine and not what this
+	// checks; toolCalls filters down to actual tools/call attempts.)
+	if calls := toolCalls(mocks.payments.Calls()); len(calls) != 0 {
+		t.Fatalf("payments upstream received %d tools/call(s) for a denied request, want 0: %+v", len(calls), calls)
+	}
+}
+
+// toolCalls filters a mock upstream's recorded calls down to actual
+// tools/call attempts, excluding the routine tools/list every upstream
+// receives once at registry startup.
+func toolCalls(calls []mockupstream.RecordedCall) []mockupstream.RecordedCall {
+	var out []mockupstream.RecordedCall
+	for _, c := range calls {
+		if c.Method == "tools/call" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func TestUnknownToolIsAProtocolError(t *testing.T) {
-	endpoint, _ := newTestGateway(t)
+	endpoint, _, _ := newTestGateway(t)
 
 	resp := callTool(t, endpoint, supportToken, "does.not.exist", nil)
 	errObj, ok := resp["error"].(map[string]any)
@@ -204,7 +253,7 @@ func TestUnknownToolIsAProtocolError(t *testing.T) {
 }
 
 func TestTaintAllowsTrustedProvenanceAndDeniesUntrusted(t *testing.T) {
-	endpoint, _ := newTestGateway(t)
+	endpoint, _, _ := newTestGateway(t)
 
 	// finance-bot fetches the account number from the trusted supplier
 	// master record...
@@ -245,7 +294,7 @@ func TestTaintAllowsTrustedProvenanceAndDeniesUntrusted(t *testing.T) {
 }
 
 func TestAggregateLimitDeniesAfterThreshold(t *testing.T) {
-	endpoint, _ := newTestGateway(t)
+	endpoint, _, _ := newTestGateway(t)
 
 	// examples/policies/limits.rego caps kb.search at 3 calls per window.
 	for i := 0; i < 3; i++ {
@@ -264,7 +313,7 @@ func TestAggregateLimitDeniesAfterThreshold(t *testing.T) {
 }
 
 func TestUnresolvedCredentialIsDenied(t *testing.T) {
-	endpoint, _ := newTestGateway(t)
+	endpoint, _, _ := newTestGateway(t)
 
 	resp := callTool(t, endpoint, "not-a-real-token", "kb.search", map[string]any{"query": "test"})
 	result := resultOf(t, resp)
@@ -274,7 +323,7 @@ func TestUnresolvedCredentialIsDenied(t *testing.T) {
 }
 
 func TestAuditChainIsIntactAfterATypicalSession(t *testing.T) {
-	endpoint, auditStore := newTestGateway(t)
+	endpoint, auditStore, _ := newTestGateway(t)
 
 	callTool(t, endpoint, supportToken, "kb.search", map[string]any{"query": "test"})
 	callTool(t, endpoint, supportToken, "payments.wire_transfer", nil) // denied
@@ -284,4 +333,164 @@ func TestAuditChainIsIntactAfterATypicalSession(t *testing.T) {
 	if err := auditStore.Verify(context.Background()); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
+}
+
+// TestUpstreamCredentialNeverLeaksAgentToken asserts the gateway's core
+// promise directly against what the upstream actually received, not just
+// against documented intent: the agent's own bearer token must never
+// appear in the request the gateway forwards. Both configured upstreams in
+// the standard test topology use an empty gateway-held token (see
+// newTestGatewayWithPolicy), so the upstream should see no Authorization
+// header at all — and, whatever it saw, it must not be the agent's.
+func TestUpstreamCredentialNeverLeaksAgentToken(t *testing.T) {
+	endpoint, _, mocks := newTestGateway(t)
+
+	callTool(t, endpoint, supportToken, "kb.search", map[string]any{"query": "test"})
+
+	calls := toolCalls(mocks.kb.Calls())
+	if len(calls) != 1 {
+		t.Fatalf("kb upstream received %d tools/call(s), want 1", len(calls))
+	}
+	if got := calls[0].AuthHeader; got == "Bearer "+supportToken {
+		t.Fatalf("upstream received the agent's own token: %q", got)
+	}
+}
+
+// TestMultipleUpstreamsRouteCorrectly asserts routing isolation directly:
+// a call to a tool on one upstream must not be visible to any other
+// upstream behind the same gateway endpoint.
+func TestMultipleUpstreamsRouteCorrectly(t *testing.T) {
+	endpoint, _, mocks := newTestGateway(t)
+
+	callTool(t, endpoint, supportToken, "kb.search", map[string]any{"query": "test"})
+	callTool(t, endpoint, financeToken, "supplier.get_account", map[string]any{"supplier_id": "S1"})
+
+	if got := len(toolCalls(mocks.kb.Calls())); got != 1 {
+		t.Fatalf("kb upstream received %d tools/call(s), want 1", got)
+	}
+	if got := len(toolCalls(mocks.supplier.Calls())); got != 1 {
+		t.Fatalf("supplier upstream received %d tools/call(s), want 1", got)
+	}
+	if got := len(toolCalls(mocks.email.Calls())); got != 0 {
+		t.Fatalf("email upstream received %d call(s), want 0 — it was never called", got)
+	}
+	if got := len(toolCalls(mocks.payments.Calls())); got != 0 {
+		t.Fatalf("payments upstream received %d tools/call(s), want 0 — it was never called", got)
+	}
+}
+
+// TestObligationsRedactField exercises allow_with_obligations end to end,
+// using the test-only fixture at testdata/obligations-policy/ — the public
+// example bundle deliberately doesn't demonstrate this (see
+// docs/policy-guide.md), so this test brings its own policy.
+func TestObligationsRedactField(t *testing.T) {
+	endpoint, _, _ := newTestGatewayWithPolicy(t, mustAbs(t, "testdata/obligations-policy"))
+
+	resp := callTool(t, endpoint, financeToken, "supplier.get_account", map[string]any{"supplier_id": "S1"})
+	result := resultOf(t, resp)
+	if isErr, _ := result["isError"].(bool); isErr {
+		t.Fatalf("expected allow_with_obligations to succeed, got isError: %v", result)
+	}
+
+	structured, ok := result["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("no structuredContent in result: %v", result)
+	}
+	if got := structured["account_number"]; got != "[REDACTED]" {
+		t.Fatalf("structuredContent.account_number = %v, want the field redacted", got)
+	}
+	// The obligation targets only this one field — everything else in the
+	// same object must pass through untouched.
+	if got := structured["supplier_id"]; got != "S1" {
+		t.Fatalf("structuredContent.supplier_id = %v, want it untouched by the redaction obligation", got)
+	}
+}
+
+// TestUpstreamUnreachableIsAToolExecutionErrorAndRecordsFailure covers
+// docs/adr/0006-operational-failure-classification.md, Decision 1, over
+// real HTTP: an upstream that was reachable when the registry built its
+// tool index, then goes down before the call, must produce a clean
+// isError:true result — not a JSON-RPC protocol error, not a hang — and
+// the audit log must still contain a record of the attempt.
+func TestUpstreamUnreachableIsAToolExecutionErrorAndRecordsFailure(t *testing.T) {
+	paymentsTS, _ := startMockUpstream(t, "payments")
+
+	upstreams := []mcp.Upstream{mcp.NewHTTPUpstream("payments", paymentsTS.URL, "")}
+	registry, err := mcp.NewStaticRegistry(context.Background(), upstreams)
+	if err != nil {
+		t.Fatalf("NewStaticRegistry: %v", err)
+	}
+
+	allowEverythingPolicy := t.TempDir()
+	writeFile(t, allowEverythingPolicy+"/policy.rego", `package helmdeep.authz
+
+decision := {"outcome": "allow", "policy_id": "test.allow"}
+`)
+	pdp := policy.NewOPADecider()
+	if err := pdp.Load(allowEverythingPolicy); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	auditPath := filepath.Join(t.TempDir(), "audit.log")
+	auditStore, err := audit.NewFileStore(auditPath)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	const token = "test-token"
+	resolver := gateway.NewStaticTokenResolver(map[string]gateway.StaticIdentity{
+		token: {ID: "agent:test", Kind: types.SubjectKindAgent},
+	})
+	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0)
+	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
+	ts := httptest.NewServer(gwServer.Handler())
+	t.Cleanup(ts.Close)
+
+	// The registry already has payments.wire_transfer indexed; now take
+	// the upstream down before the actual call.
+	paymentsTS.Close()
+
+	resp := callTool(t, ts.URL+"/mcp", token, "payments.wire_transfer", map[string]any{"account_number": "x", "amount_usd": 1})
+	result := resultOf(t, resp)
+	if isErr, _ := result["isError"].(bool); !isErr {
+		t.Fatalf("expected isError:true for an unreachable upstream, got %v", result)
+	}
+
+	records := readAuditRecords(t, auditPath)
+	found := false
+	for _, rec := range records {
+		if rec.Outcome == types.RecordOutcomeFailed {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no RecordOutcomeFailed record found among %d records", len(records))
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func readAuditRecords(t *testing.T, path string) []types.ActionRecord {
+	t.Helper()
+	data, err := os.ReadFile(path) // #nosec G304 -- test's own t.TempDir() fixture
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var records []types.ActionRecord
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec types.ActionRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("unmarshal audit record: %v", err)
+		}
+		records = append(records, rec)
+	}
+	return records
 }

@@ -100,6 +100,49 @@ func TestExamplePolicies(t *testing.T) {
 			wantOutcome:  types.OutcomeAllow,
 			wantPolicyID: "combined.allow",
 		},
+		{
+			// Empty scope: an agent with no entry in allowed_tools at all,
+			// not merely one missing this specific tool.
+			name: "an agent with no scope entry at all is denied",
+			req: types.DecisionRequest{
+				Subject: types.Subject{ID: "agent:nobody-configured-this-one"},
+				Action:  types.Action{Tool: "kb.search"},
+			},
+			wantOutcome:  types.OutcomeDeny,
+			wantPolicyID: "scope.deny",
+		},
+		{
+			// Adjacent-but-different: a tool name that's plausible-looking
+			// but not the one actually granted — proves scope matches the
+			// exact tool name, not a prefix or a fuzzy match.
+			name: "a similarly-named but ungranted tool is denied, not fuzzy-matched into scope",
+			req: types.DecisionRequest{
+				Subject: types.Subject{ID: "agent:support-bot"},
+				Action:  types.Action{Tool: "kb.delete"},
+			},
+			wantOutcome:  types.OutcomeDeny,
+			wantPolicyID: "scope.deny",
+		},
+		{
+			// Mixed provenance: account_number is trusted (the only
+			// argument taint.rego actually checks for this tool) while
+			// amount_usd is untrusted — the call must still be allowed,
+			// proving the taint check is scoped to the specific argument
+			// the policy names, not "every argument must be trusted."
+			name: "mixed provenance: only the checked argument's trust matters",
+			req: types.DecisionRequest{
+				Subject: types.Subject{ID: "agent:finance-bot"},
+				Action: types.Action{
+					Tool: "payments.wire_transfer",
+					Arguments: map[string]types.Value{
+						"account_number": trusted,
+						"amount_usd":     {Data: 250.0, Provenance: types.Provenance{Source: "unspecified", Trusted: false}},
+					},
+				},
+			},
+			wantOutcome:  types.OutcomeAllow,
+			wantPolicyID: "combined.allow",
+		},
 	}
 
 	for _, tt := range tests {

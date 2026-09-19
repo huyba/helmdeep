@@ -156,6 +156,75 @@ func TestFileStore_RecoversChainAcrossRestart(t *testing.T) {
 	}
 }
 
+func TestFileStore_VerifyDetectsReorderedRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	s, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	for _, tool := range []string{"a", "b", "c"} {
+		if err := s.Append(context.Background(), testRecord(tool, types.RecordOutcomeAllowed)); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	// Swap the first two records. Each one's prev_hash still points at the
+	// real hash of whatever preceded it originally — which, after the
+	// swap, is no longer what's actually there.
+	lines := readLines(t, path)
+	lines[0], lines[1] = lines[1], lines[0]
+	writeLines(t, path, lines)
+
+	if err := s.Verify(context.Background()); err == nil {
+		t.Fatal("Verify: expected an error after reordering records, got nil")
+	}
+}
+
+func TestFileStore_VerifyDetectsForgedRecordWithWrongPrevHash(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	s, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := s.Append(context.Background(), testRecord("a", types.RecordOutcomeAllowed)); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	// Build a record that is internally self-consistent — its own Hash is
+	// correctly computed from its own contents plus its (fabricated)
+	// PrevHash — but whose PrevHash doesn't match the real chain's actual
+	// tail. This is what an attacker with write access but no way to
+	// recompute the real chain would produce: a plausible-looking record
+	// appended without knowing (or bothering to match) what really came
+	// before it.
+	forged := testRecord("forged", types.RecordOutcomeAllowed)
+	forged.PrevHash = "0000000000000000000000000000000000000000000000000000000000000000000000000000"
+	hash, err := computeHash(forged)
+	if err != nil {
+		t.Fatalf("computeHash: %v", err)
+	}
+	forged.Hash = hash
+
+	line, err := json.Marshal(forged)
+	if err != nil {
+		t.Fatalf("marshal forged record: %v", err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- test's own t.TempDir() fixture
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		t.Fatalf("write forged record: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	if err := s.Verify(context.Background()); err == nil {
+		t.Fatal("Verify: expected an error for a forged record with a wrong prev_hash, got nil")
+	}
+}
+
 func readLines(t *testing.T, path string) [][]byte {
 	t.Helper()
 	data, err := os.ReadFile(path) // #nosec G304 -- path is always this test's own t.TempDir() fixture, not external input

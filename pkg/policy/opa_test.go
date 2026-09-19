@@ -169,3 +169,50 @@ decision := {"outcome": "maybe", "policy_id": "broken", "reason": "not a real ou
 		t.Fatalf("got %+v, want deny/unrecognized_outcome", resp)
 	}
 }
+
+// TestOPADecider_EmptyPolicyDirectoryDenies is the "empty or missing policy
+// must deny, not allow" requirement, made concrete: a directory with zero
+// .rego files compiles successfully (there's nothing invalid about an
+// empty bundle) but defines no `decision` rule at all, so the query is
+// undefined for every input — which Decide treats identically to any other
+// failure to get a real answer.
+func TestOPADecider_EmptyPolicyDirectoryDenies(t *testing.T) {
+	d := NewOPADecider()
+	if err := d.Load(t.TempDir()); err != nil {
+		t.Fatalf("Load an empty policy directory: %v", err)
+	}
+
+	resp, err := d.Decide(context.Background(), decisionRequest("kb.search"))
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if resp.Outcome != types.OutcomeDeny || resp.PolicyID != "policy_undefined" {
+		t.Fatalf("got %+v, want deny/policy_undefined", resp)
+	}
+}
+
+// TestOPADecider_NonObjectDecisionIsDenied covers policy output that isn't
+// even the right shape — a string instead of an object — as distinct from
+// TestOPADecider_UnrecognizedOutcomeIsDenied's "right shape, wrong value."
+// Both are "malformed PDP output," but they fail at different points in
+// Decide (JSON-unmarshal-into-struct vs. the outcome switch), so both are
+// worth locking in separately.
+func TestOPADecider_NonObjectDecisionIsDenied(t *testing.T) {
+	dir := t.TempDir()
+	writePolicy(t, dir, `package helmdeep.authz
+
+decision := "just a string, not an object"
+`)
+	d := NewOPADecider()
+	if err := d.Load(dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	resp, err := d.Decide(context.Background(), decisionRequest("kb.search"))
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if resp.Outcome != types.OutcomeDeny || resp.PolicyID != "result_parse_error" {
+		t.Fatalf("got %+v, want deny/result_parse_error", resp)
+	}
+}

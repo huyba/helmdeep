@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 )
 
 // ToolDef is one tool this mock exposes: its MCP-visible schema, and a
@@ -85,18 +86,50 @@ var Profiles = map[string][]ToolDef{
 	},
 }
 
-// NewHandler builds an http.Handler serving the named profile's tools over
-// Streamable HTTP.
-func NewHandler(profile string) (http.Handler, error) {
+// RecordedCall is one request this mock actually received, kept so a test
+// can assert on what did or didn't reach the upstream — not just on what
+// the agent got back. This is the mechanism behind assertions like "a
+// denied call never reaches upstream" and "the agent's own credential
+// never appears in the upstream request."
+type RecordedCall struct {
+	Method     string // "tools/list" or "tools/call"
+	Tool       string // empty for tools/list
+	Arguments  map[string]any
+	AuthHeader string // the raw Authorization header this mock received, if any
+}
+
+// NewHandler builds a Server serving the named profile's tools over
+// Streamable HTTP. The concrete *Server return (rather than a bare
+// http.Handler) is deliberate: callers that only need to mount it don't
+// need to change, and callers that need to inspect what it received (see
+// RecordedCall) can.
+func NewHandler(profile string) (*Server, error) {
 	tools, ok := Profiles[profile]
 	if !ok {
 		return nil, fmt.Errorf("unknown mock upstream profile %q", profile)
 	}
-	return &server{tools: tools}, nil
+	return &Server{tools: tools}, nil
 }
 
-type server struct {
+// Server is a mock upstream MCP server. Safe for concurrent use.
+type Server struct {
 	tools []ToolDef
+
+	mu    sync.Mutex
+	calls []RecordedCall
+}
+
+// Calls returns every request this server has received so far, in order.
+func (s *Server) Calls() []RecordedCall {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]RecordedCall(nil), s.calls...)
+}
+
+func (s *Server) record(rc RecordedCall) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, rc)
 }
 
 type rpcRequest struct {
@@ -106,24 +139,26 @@ type rpcRequest struct {
 	Params  json.RawMessage `json:"params"`
 }
 
-func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req rpcRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeRPCError(w, req.ID, -32700, "malformed JSON-RPC: "+err.Error())
 		return
 	}
+	authHeader := r.Header.Get("Authorization")
 
 	switch req.Method {
 	case "tools/list":
+		s.record(RecordedCall{Method: "tools/list", AuthHeader: authHeader})
 		s.handleListTools(w, req)
 	case "tools/call":
-		s.handleCallTool(w, req)
+		s.handleCallTool(w, req, authHeader)
 	default:
 		writeRPCError(w, req.ID, -32601, "method not found: "+req.Method)
 	}
 }
 
-func (s *server) handleListTools(w http.ResponseWriter, req rpcRequest) {
+func (s *Server) handleListTools(w http.ResponseWriter, req rpcRequest) {
 	type toolOut struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -148,7 +183,7 @@ type toolCallParams struct {
 	Arguments map[string]any `json:"arguments"`
 }
 
-func (s *server) handleCallTool(w http.ResponseWriter, req rpcRequest) {
+func (s *Server) handleCallTool(w http.ResponseWriter, req rpcRequest, authHeader string) {
 	var p toolCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		writeRPCError(w, req.ID, -32602, "malformed params: "+err.Error())
@@ -159,6 +194,7 @@ func (s *server) handleCallTool(w http.ResponseWriter, req rpcRequest) {
 		if t.Name != p.Name {
 			continue
 		}
+		s.record(RecordedCall{Method: "tools/call", Tool: p.Name, Arguments: p.Arguments, AuthHeader: authHeader})
 		structured, isError, errText := t.Handler(p.Arguments)
 		content := []map[string]any{{"type": "text", "text": errText}}
 		if !isError {
@@ -172,6 +208,9 @@ func (s *server) handleCallTool(w http.ResponseWriter, req rpcRequest) {
 		})
 		return
 	}
+	// Deliberately not recorded: an unknown-tool call never reached a real
+	// tool handler, so there's nothing for a "did the mock get called"
+	// assertion to mean here.
 	writeRPCError(w, req.ID, -32602, "unknown tool: "+p.Name)
 }
 

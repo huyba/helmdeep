@@ -15,7 +15,6 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -46,6 +45,15 @@ type Gateway struct {
 	// must opt an upstream into being a trusted source, never the reverse.
 	upstreamProvenance map[string]types.Provenance
 
+	// decisionTimeout bounds how long a single PDP.Decide call is allowed
+	// to run before the gateway gives up and denies. Zero means no bound —
+	// the request's own context is the only limit. A Decider that hangs
+	// (a future non-embedded implementation over a network, for instance)
+	// must not be able to hang tools/call indefinitely; see
+	// docs/adr/0003-fail-closed-behavior.md — a timeout is treated exactly
+	// like any other Decide error: deny.
+	decisionTimeout time.Duration
+
 	usage *usageTracker
 	prov  *provenanceCache
 	now   func() time.Time
@@ -54,18 +62,30 @@ type Gateway struct {
 // New builds a Gateway from its dependencies. identity, pdp, auditLog, and
 // registry are all interfaces; see the type's doc comment for why that
 // matters. upstreamProvenance maps upstream name to the provenance label
-// applied to values it returns — see the field's doc comment.
-func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registry mcp.Registry, upstreamProvenance map[string]types.Provenance) *Gateway {
+// applied to values it returns — see the field's doc comment. decisionTimeout
+// bounds each policy decision; pass 0 for no bound.
+func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registry mcp.Registry, upstreamProvenance map[string]types.Provenance, decisionTimeout time.Duration) *Gateway {
 	return &Gateway{
 		identity:           id,
 		pdp:                pdp,
 		auditLog:           auditLog,
 		registry:           registry,
 		upstreamProvenance: upstreamProvenance,
+		decisionTimeout:    decisionTimeout,
 		usage:              newUsageTracker(),
 		prov:               newProvenanceCache(),
 		now:                time.Now,
 	}
+}
+
+// decide wraps pdp.Decide with the configured decision timeout, if any.
+func (g *Gateway) decide(ctx context.Context, req types.DecisionRequest) (types.DecisionResponse, error) {
+	if g.decisionTimeout <= 0 {
+		return g.pdp.Decide(ctx, req)
+	}
+	ctx, cancel := context.WithTimeout(ctx, g.decisionTimeout)
+	defer cancel()
+	return g.pdp.Decide(ctx, req)
 }
 
 // ListTools returns the tools the caller identified by cc.Credential is
@@ -96,7 +116,7 @@ func (g *Gateway) ListTools(ctx context.Context, cc mcp.CallContext, cursor stri
 				Usage:     g.usage.usagePeek(subject.ID, now),
 			},
 		}
-		decision, err := g.pdp.Decide(ctx, req)
+		decision, err := g.decide(ctx, req)
 		if err != nil {
 			continue // fail closed per tool: an error hides exactly that one tool, not the whole list
 		}
@@ -144,7 +164,7 @@ func (g *Gateway) CallTool(ctx context.Context, cc mcp.CallContext, name string,
 		},
 	}
 
-	decision, err := g.pdp.Decide(ctx, req)
+	decision, err := g.decide(ctx, req)
 	if err != nil {
 		// Belt and suspenders on top of OPADecider's own fail-closed
 		// behavior: whatever Decider this gateway is wired to, an error
@@ -203,7 +223,12 @@ func (g *Gateway) CallTool(ctx context.Context, cc mcp.CallContext, name string,
 		}); err != nil {
 			slog.Error("failed to record upstream failure", "tool", name, "error", err)
 		}
-		return types.ToolResult{}, fmt.Errorf("upstream call failed: %w", callErr)
+		// A tool execution error (isError: true), not a protocol error —
+		// see docs/adr/0006-operational-failure-classification.md. The
+		// call was authorized; it's the environment that failed, and the
+		// calling model can potentially react to that the same way it
+		// reacts to a denial.
+		return failedResult("upstream call failed: " + callErr.Error()), nil
 	}
 
 	if decision.Outcome == types.OutcomeAllowWithObligations {
@@ -235,8 +260,16 @@ func (g *Gateway) denyWithoutSubject(ctx context.Context, name string, arguments
 }
 
 func deniedResult(reason string) types.ToolResult {
+	return textErrorResult("denied: " + reason)
+}
+
+func failedResult(reason string) types.ToolResult {
+	return textErrorResult(reason)
+}
+
+func textErrorResult(text string) types.ToolResult {
 	content, _ := json.Marshal([]map[string]any{
-		{"type": "text", "text": "denied: " + reason},
+		{"type": "text", "text": text},
 	})
 	return types.ToolResult{Content: content, IsError: true}
 }

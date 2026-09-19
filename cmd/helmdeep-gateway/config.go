@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"sigs.k8s.io/yaml"
 
@@ -26,6 +27,11 @@ type config struct {
 
 	Policy struct {
 		Path string `json:"path"`
+		// DecisionTimeout bounds each PDP decision, e.g. "200ms". Empty
+		// means no bound. See internal/gateway.Gateway's decisionTimeout
+		// field and docs/adr/0003-fail-closed-behavior.md — a timeout is
+		// treated exactly like any other Decide error: deny.
+		DecisionTimeout string `json:"decision_timeout"`
 	} `json:"policy"`
 
 	Audit struct {
@@ -76,7 +82,19 @@ func loadConfig(path string) (config, error) {
 			return config{}, fmt.Errorf("config %s: every upstream needs a name and url", path)
 		}
 	}
+	if _, err := cfg.decisionTimeout(); err != nil {
+		return config{}, fmt.Errorf("config %s: policy.decision_timeout: %w", path, err)
+	}
 	return cfg, nil
+}
+
+// decisionTimeout parses Policy.DecisionTimeout, returning 0 (no timeout)
+// if it's unset.
+func (c config) decisionTimeout() (time.Duration, error) {
+	if c.Policy.DecisionTimeout == "" {
+		return 0, nil
+	}
+	return time.ParseDuration(c.Policy.DecisionTimeout)
 }
 
 // staticIdentities converts the config's identity.static_tokens section into

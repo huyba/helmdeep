@@ -98,7 +98,11 @@ func runServe(args []string) error {
 		return fmt.Errorf("reach configured upstreams: %w", err)
 	}
 
-	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance())
+	decisionTimeout, err := cfg.decisionTimeout()
+	if err != nil {
+		return err // already validated in loadConfig; defensive
+	}
+	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance(), decisionTimeout)
 	server := mcp.NewServer(cfg.Listen, cfg.Path, gw, version)
 
 	// SIGHUP reloads the policy bundle without restarting the gateway or
