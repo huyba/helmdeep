@@ -67,7 +67,7 @@ func newIdentityGateway(t *testing.T) identityGatewaySetup {
 	broker := identity.NewHTTPCredentialBroker(issuerHTTP.URL + "/token-exchange")
 	gw := gateway.New(resolver, pdp, auditStore, registry,
 		map[string]types.Provenance{"suppliermaster": {Source: "suppliermaster", Trusted: true}},
-		0, broker)
+		0, broker, registerAllTools(t, registry))
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "identity-test")
 
 	ts := httptest.NewServer(gwServer.Handler())
@@ -84,7 +84,7 @@ func newIdentityGateway(t *testing.T) identityGatewaySetup {
 func TestValidSITAllowsCallAndRecordsVerifiedPrincipal(t *testing.T) {
 	setup := newIdentityGateway(t)
 
-	sit, err := setup.issuer.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com", "agent:finance-bot"}, 15*time.Minute)
+	sit, err := setup.issuer.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com", "agent:finance-bot"}, nil, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestForgedSITIsDeniedAndLedgered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("devissuer.New: %v", err)
 	}
-	forged, err := attacker.IssueSIT("agent:finance-bot", nil, 15*time.Minute)
+	forged, err := attacker.IssueSIT("agent:finance-bot", nil, nil, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestForgedSITIsDeniedAndLedgered(t *testing.T) {
 func TestExpiredSITIsDeniedAndLedgered(t *testing.T) {
 	setup := newIdentityGateway(t)
 
-	expired, err := setup.issuer.IssueSIT("agent:finance-bot", nil, -time.Minute) // already expired
+	expired, err := setup.issuer.IssueSIT("agent:finance-bot", nil, nil, -time.Minute) // already expired
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}

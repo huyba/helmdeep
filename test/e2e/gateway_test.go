@@ -25,8 +25,30 @@ import (
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
+	"github.com/huyba/helmdeep/pkg/toolregistry"
 	"github.com/huyba/helmdeep/pkg/types"
 )
+
+// registerAllTools builds a Tool Registry that declares every tool a
+// gateway's mcp.Registry can already route to, at RiskLow with no data
+// classes or required scopes. Real deployments must curate this list by
+// hand (docs/05-tool-gateway.md §1) — see cmd/helmdeep-gateway/config.go's
+// tools: section — but most of this suite is testing something other than
+// the Tool Registry gate itself, so registering everything the upstream
+// topology already exposes keeps those tests focused on what they actually
+// assert instead of on Tool Registry bookkeeping.
+func registerAllTools(t testing.TB, reg mcp.Registry) *toolregistry.Registry {
+	t.Helper()
+	var entries []toolregistry.Entry
+	for _, tool := range reg.Tools() {
+		entries = append(entries, toolregistry.Entry{ToolID: tool.Name, Risk: toolregistry.RiskLow})
+	}
+	toolReg, err := toolregistry.New(entries)
+	if err != nil {
+		t.Fatalf("toolregistry.New: %v", err)
+	}
+	return toolReg
+}
 
 const (
 	supportToken = "support-token"
@@ -108,7 +130,7 @@ func newTestGatewayWithPolicy(t testing.TB, policyPath string) (endpoint string,
 		"email":          {Source: "email", Trusted: false},
 	}
 
-	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil)
+	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil, registerAllTools(t, registry))
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
 
 	ts := httptest.NewServer(gwServer.Handler())
@@ -441,7 +463,7 @@ decision := {"outcome": "allow", "policy_id": "test.allow"}
 	resolver := gateway.NewStaticTokenResolver(map[string]gateway.StaticIdentity{
 		token: {ID: "agent:test", Kind: types.SubjectKindAgent},
 	})
-	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0, nil)
+	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0, nil, registerAllTools(t, registry))
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
 	ts := httptest.NewServer(gwServer.Handler())
 	t.Cleanup(ts.Close)
