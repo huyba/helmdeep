@@ -14,6 +14,7 @@ overlooked.
 | Audit / Action Record store | Interface + file-backed impl | `pkg/audit` |
 | MCP protocol handling | Interface + wire implementation | `pkg/mcp` |
 | Identity & credential exchange | **Partial** — real JWT verification + credential broker (Milestone M1); no SPIRE, no revocation | `pkg/identity`, `internal/devissuer` |
+| Tool Registry | **Partial** — risk rating, data classes, required scopes, undeclared-tool refusal (Milestone M2) | `pkg/toolregistry` |
 | Model Gateway | **Interface + stub only** — no implementation | `pkg/modelgw` |
 | Agent sandbox runtime | **Interface + stub only** — no implementation | `pkg/sandbox` |
 | Scheduler | **Interface + stub only** — no implementation | `pkg/scheduler` |
