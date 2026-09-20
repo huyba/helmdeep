@@ -111,6 +111,14 @@ func NewHandler(profile string) (*Server, error) {
 	return &Server{tools: tools}, nil
 }
 
+// NewCustomHandler builds a Server serving an arbitrary, caller-supplied
+// tool set instead of one of the named Profiles — for tests that need a
+// tool shaped a specific way (e.g. a tool description or result containing
+// adversarial content) rather than one of the standard demo tools.
+func NewCustomHandler(tools []ToolDef) *Server {
+	return &Server{tools: tools}
+}
+
 // Server is a mock upstream MCP server. Safe for concurrent use.
 type Server struct {
 	tools []ToolDef
