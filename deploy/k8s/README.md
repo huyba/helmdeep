@@ -46,6 +46,12 @@ against `localhost:8443`.
   be a meaningfully better signal; it doesn't exist yet.
 - **`secret.yaml` ships placeholder values.** Read its own comments before
   applying it anywhere real.
+- **Identity is `-dev-insecure` static tokens, not real verification.**
+  `configmap.yaml` uses `identity.static_tokens`, which is unverifiable by
+  design (see `docs/adr/0007-credential-broker-scope.md`) — that's why
+  `deployment.yaml` passes `-dev-insecure`. Replace both with `identity.jwt`
+  pointing at a real issuer once one is deployable; `internal/devissuer`
+  exists as a library today but has no standalone image yet.
 - **The image tag `latest` in `deployment.yaml` is a placeholder.** Point
   it at your registry and a real tag (a git SHA or release tag) before
   this leaves a local demo — see `.github/workflows/release.yml` for how

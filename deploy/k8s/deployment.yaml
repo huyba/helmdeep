@@ -34,7 +34,10 @@ spec:
         - name: helmdeep-gateway
           image: helmdeep-gateway:latest # replace with your registry/tag; do not run `latest` in a real environment
           imagePullPolicy: IfNotPresent
-          args: ["serve", "-config=/etc/helmdeep/config.yaml"]
+          # -dev-insecure: configmap.yaml's config.yaml uses
+          # identity.static_tokens (see its own DEVELOPMENT ONLY note) —
+          # remove this flag once identity.jwt replaces it.
+          args: ["serve", "-config=/etc/helmdeep/config.yaml", "-dev-insecure"]
           ports:
             - name: mcp
               containerPort: 8443

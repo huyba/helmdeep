@@ -22,6 +22,22 @@ data:
     audit:
       path: /data/audit.log
 
+    # DEVELOPMENT ONLY — see internal/gateway/identity.go and
+    # docs/adr/0007-credential-broker-scope.md. Static-token identity is
+    # unverifiable; the Deployment's args must include -dev-insecure for
+    # the gateway to even start with this configured (Milestone M1). The
+    # real path is `jwt:` here instead (pkg/identity.JWTResolver) once a
+    # deployable identity issuer exists — internal/devissuer today has no
+    # standalone binary or image; that's Milestone M4's "one-command
+    # emulator," not this manifest's job to anticipate. Replace this
+    # entire section before this leaves a demo.
+    identity:
+      static_tokens:
+        example-token:
+          id: agent:example-bot
+          kind: agent
+          trust_level: 0
+
     # Replace with real upstream services once they exist. bearer_token_env
     # names an env var (see secret.yaml) — the token itself never appears
     # in this ConfigMap.
