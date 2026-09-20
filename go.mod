@@ -3,6 +3,7 @@ module github.com/huyba/helmdeep
 go 1.26.0
 
 require (
+	github.com/lestrrat-go/jwx/v3 v3.2.0
 	github.com/open-policy-agent/opa v1.20.2
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -19,7 +20,6 @@ require (
 	github.com/lestrrat-go/dsig-secp256k1 v1.0.0 // indirect
 	github.com/lestrrat-go/httpcc v1.0.1 // indirect
 	github.com/lestrrat-go/httprc/v3 v3.0.6 // indirect
-	github.com/lestrrat-go/jwx/v3 v3.2.0 // indirect
 	github.com/lestrrat-go/option/v2 v2.0.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect

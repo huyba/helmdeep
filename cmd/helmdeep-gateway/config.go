@@ -39,11 +39,32 @@ type config struct {
 	} `json:"audit"`
 
 	Identity struct {
+		// StaticTokens is the pre-Milestone-M1 dev/test identity source: a
+		// fixed token→identity map, no verification beyond map lookup. It
+		// is refused at startup unless the -dev-insecure flag is passed —
+		// see main.go's runServe. Prefer JWT below for anything else.
 		StaticTokens map[string]struct {
 			ID         string `json:"id"`
 			Kind       string `json:"kind"`
 			TrustLevel int    `json:"trust_level"`
 		} `json:"static_tokens"`
+
+		// JWT configures the real identity path: Session Identity Tokens
+		// (docs/04-identity-authz.md §1.1) verified against a JWKS. In
+		// Phase 0 the only issuer that exists is internal/devissuer; see
+		// docs/adr/0007-credential-broker-scope.md.
+		JWT *struct {
+			Audience string `json:"audience"` // must match the issuer's audience exactly
+			JWKSURL  string `json:"jwks_url"` // fetched once at startup — see runServe
+			// ExchangeURL, if set, enables the Credential Broker: the
+			// gateway calls this RFC-8693-shaped endpoint to mint a
+			// per-call scoped credential for each allowed tool call
+			// (docs/04-identity-authz.md §3) instead of using an
+			// upstream's static bearer_token_env. Leave empty to keep
+			// upstreams on their static credentials while still verifying
+			// callers via JWT.
+			ExchangeURL string `json:"exchange_url"`
+		} `json:"jwt"`
 	} `json:"identity"`
 
 	Upstreams []struct {
@@ -84,6 +105,18 @@ func loadConfig(path string) (config, error) {
 	}
 	if _, err := cfg.decisionTimeout(); err != nil {
 		return config{}, fmt.Errorf("config %s: policy.decision_timeout: %w", path, err)
+	}
+	hasStatic := len(cfg.Identity.StaticTokens) > 0
+	hasJWT := cfg.Identity.JWT != nil
+	switch {
+	case hasStatic && hasJWT:
+		return config{}, fmt.Errorf("config %s: identity.static_tokens and identity.jwt are mutually exclusive", path)
+	case !hasStatic && !hasJWT:
+		return config{}, fmt.Errorf("config %s: identity.static_tokens or identity.jwt is required", path)
+	case hasJWT && cfg.Identity.JWT.Audience == "":
+		return config{}, fmt.Errorf("config %s: identity.jwt.audience is required", path)
+	case hasJWT && cfg.Identity.JWT.JWKSURL == "":
+		return config{}, fmt.Errorf("config %s: identity.jwt.jwks_url is required", path)
 	}
 	return cfg, nil
 }

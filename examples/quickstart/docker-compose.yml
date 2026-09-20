@@ -17,7 +17,11 @@ services:
 
   gateway:
     build: { context: ../../, dockerfile: deploy/docker/Dockerfile }
-    command: ["serve", "-config=/etc/helmdeep/config.yaml"]
+    # -dev-insecure: this quickstart's config.yaml uses identity.static_tokens
+    # (see its own DEVELOPMENT ONLY note) — Milestone M1 refuses to start
+    # with static-token identity otherwise. The real path is
+    # identity.jwt + internal/devissuer; see docs/adr/0007-credential-broker-scope.md.
+    command: ["serve", "-config=/etc/helmdeep/config.yaml", "-dev-insecure"]
     volumes:
       - ./config.yaml:/etc/helmdeep/config.yaml:ro
       - ../policies:/etc/helmdeep/policies:ro

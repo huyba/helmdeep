@@ -108,7 +108,7 @@ func newTestGatewayWithPolicy(t testing.TB, policyPath string) (endpoint string,
 		"email":          {Source: "email", Trusted: false},
 	}
 
-	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0)
+	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil)
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
 
 	ts := httptest.NewServer(gwServer.Handler())
@@ -441,7 +441,7 @@ decision := {"outcome": "allow", "policy_id": "test.allow"}
 	resolver := gateway.NewStaticTokenResolver(map[string]gateway.StaticIdentity{
 		token: {ID: "agent:test", Kind: types.SubjectKindAgent},
 	})
-	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0)
+	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0, nil)
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
 	ts := httptest.NewServer(gwServer.Handler())
 	t.Cleanup(ts.Close)

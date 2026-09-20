@@ -13,7 +13,7 @@ overlooked.
 | Policy Decision Point | Interface + embedded OPA/Rego engine | `pkg/policy` |
 | Audit / Action Record store | Interface + file-backed impl | `pkg/audit` |
 | MCP protocol handling | Interface + wire implementation | `pkg/mcp` |
-| Identity & credential exchange | **Interface + stub only** — no implementation | `pkg/identity` |
+| Identity & credential exchange | **Partial** — real JWT verification + credential broker (Milestone M1); no SPIRE, no revocation | `pkg/identity`, `internal/devissuer` |
 | Model Gateway | **Interface + stub only** — no implementation | `pkg/modelgw` |
 | Agent sandbox runtime | **Interface + stub only** — no implementation | `pkg/sandbox` |
 | Scheduler | **Interface + stub only** — no implementation | `pkg/scheduler` |

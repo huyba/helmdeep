@@ -19,6 +19,14 @@ type Tool struct {
 type ToolCall struct {
 	Tool      string
 	Arguments map[string]Value
+	// Credential, if non-empty, is a per-call token the Credential Broker
+	// minted for this specific upstream+tool (docs/04-identity-authz.md
+	// §3) — an mcp.Upstream implementation should present this instead of
+	// whatever static credential it might otherwise be configured with.
+	// Empty means no broker is configured; the upstream falls back to its
+	// own static configuration, which is the pre-Milestone-M1 behavior and
+	// remains valid for upstreams that don't need per-call credentials.
+	Credential string
 }
 
 // ToolResult is what the upstream MCP server returned for a ToolCall,

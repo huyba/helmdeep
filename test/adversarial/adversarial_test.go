@@ -81,7 +81,7 @@ func startGateway(t *testing.T, policyPath string, identities map[string]gateway
 	}
 
 	resolver := gateway.NewStaticTokenResolver(identities)
-	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0)
+	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil)
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "adversarial-test")
 
 	ts := httptest.NewServer(gwServer.Handler())

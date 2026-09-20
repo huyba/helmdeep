@@ -133,7 +133,7 @@ func newTestGatewayWithOpts(t *testing.T, decider policy.Decider, decisionTimeou
 	}
 
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
-	gw := New(stubResolver{subject: subject}, decider, store, registry, nil, decisionTimeout)
+	gw := New(stubResolver{subject: subject}, decider, store, registry, nil, decisionTimeout, nil)
 	return gw, upstream, store, registry
 }
 
@@ -289,7 +289,7 @@ func TestDenialsProduceAuditRecords(t *testing.T) {
 // deterministic because Gateway.now is an injectable clock — no real
 // sleeping involved.
 func TestUsageWindowResets(t *testing.T) {
-	gw := New(stubResolver{subject: types.Subject{ID: "agent:test"}}, stubDecider{}, mustNewAuditStore(t), &staticRegistry{tool: types.Tool{Name: "t"}, upstream: &spyUpstream{}}, nil, 0)
+	gw := New(stubResolver{subject: types.Subject{ID: "agent:test"}}, stubDecider{}, mustNewAuditStore(t), &staticRegistry{tool: types.Tool{Name: "t"}, upstream: &spyUpstream{}}, nil, 0, nil)
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	gw.now = func() time.Time { return base }

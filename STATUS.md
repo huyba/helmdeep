@@ -14,7 +14,7 @@ either way.)
 | 01 | Requirements & Use Cases | N/A (requirements spec) | — |
 | 02 | System Architecture | Partial | `pkg/types`, `pkg/mcp`, `pkg/policy`, `pkg/audit`; the 4-plane split and Action Record model are real, but only the Data-Plane/Governance slice needed by the Tool Gateway exists — Control Plane and Observability Plane are each one interface, not a plane |
 | 03 | Agent Runtime & Isolation | Interface-only | `pkg/sandbox` |
-| 04 | Identity & Authorization | Interface-only | `pkg/identity` (interface); `internal/gateway.StaticTokenResolver` is a dev-only bootstrap, explicitly not this doc's design — see its doc comment and `ARCHITECTURE.md` |
+| 04 | Identity & Authorization | Partial (Milestone M1) | `pkg/identity.JWTResolver` verifies real, signed Session Identity Tokens (agent hop cryptographically verified; human hop asserted, not independently verified — no real IdP exists); `pkg/identity.HTTPCredentialBroker` + `internal/devissuer` mint per-call, scoped, short-lived upstream credentials (doc 04 §3, self-contained since no upstream implements RFC 8693 itself). `internal/gateway.StaticTokenResolver` remains as a dev/test fallback, now gated behind `-dev-insecure`. Not done: SPIRE integration, revocation, RBAC/ABAC/ReBAC layering beyond existing policy, Enterprise IdP sync (doc 04 §6). See `docs/adr/0007-credential-broker-scope.md` for the full list of what's simplified and why. |
 | 05 | Tool Gateway & Connectors | **Implemented** | `internal/gateway`, `pkg/mcp`, `pkg/policy`, `pkg/audit`, `cmd/helmdeep-gateway` |
 | 06 | Orchestration Engine | Interface-only | `pkg/scheduler` |
 | 07 | Model Gateway | Interface-only | `pkg/modelgw` |

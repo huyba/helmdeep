@@ -53,7 +53,7 @@ func (u *HTTPUpstream) ListTools(ctx context.Context) ([]types.Tool, error) {
 	var listResult struct {
 		Tools []types.Tool `json:"tools"`
 	}
-	if err := u.call(ctx, "tools/list", "", map[string]any{}, &listResult); err != nil {
+	if err := u.call(ctx, "tools/list", "", "", map[string]any{}, &listResult); err != nil {
 		return nil, err
 	}
 	for i := range listResult.Tools {
@@ -73,7 +73,7 @@ func (u *HTTPUpstream) CallTool(ctx context.Context, tc types.ToolCall) (types.T
 	}
 
 	var result types.ToolResult
-	if err := u.call(ctx, "tools/call", tc.Tool, params, &result); err != nil {
+	if err := u.call(ctx, "tools/call", tc.Tool, tc.Credential, params, &result); err != nil {
 		return types.ToolResult{}, err
 	}
 	return result, nil
@@ -81,8 +81,10 @@ func (u *HTTPUpstream) CallTool(ctx context.Context, tc types.ToolCall) (types.T
 
 // call sends one JSON-RPC request to the upstream and decodes its `result`
 // into out. name is the Mcp-Name header value for tools/call and empty for
-// methods that don't carry one (e.g. tools/list).
-func (u *HTTPUpstream) call(ctx context.Context, method, name string, params map[string]any, out any) error {
+// methods that don't carry one (e.g. tools/list). credentialOverride, if
+// non-empty, is presented instead of the upstream's own configured static
+// bearerToken — see types.ToolCall.Credential's doc comment.
+func (u *HTTPUpstream) call(ctx context.Context, method, name, credentialOverride string, params map[string]any, out any) error {
 	params["_meta"] = map[string]any{
 		"io.modelcontextprotocol/protocolVersion":    string(ProtocolVersionCurrent),
 		"io.modelcontextprotocol/clientCapabilities": map[string]any{},
@@ -113,7 +115,9 @@ func (u *HTTPUpstream) call(ctx context.Context, method, name string, params map
 	if name != "" {
 		req.Header.Set("Mcp-Name", name)
 	}
-	if u.bearerToken != "" {
+	if token := credentialOverride; token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else if u.bearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+u.bearerToken)
 	}
 

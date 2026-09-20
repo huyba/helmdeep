@@ -1,18 +1,15 @@
 // Copyright (c) 2026 Overarching AI LLC
 // SPDX-License-Identifier: Apache-2.0
 
-// STATUS: interface only. Not implemented. See docs/ROADMAP.md.
-//
-// Package identity will hold the real identity & credential exchange
-// component: workload identity (SPIFFE/SPIRE), OBO token exchange, and the
-// credential broker that mints just-in-time, narrowly scoped credentials —
-// see docs/04-identity-authz.md.
-//
-// The Tool Gateway built in Step 2 does not depend on this package. It
-// resolves caller identity through a minimal static token→identity map that
-// lives in internal/gateway and happens to satisfy the Resolver interface
-// below, so the real implementation can later be swapped in here without
-// changing the gateway's calling code.
+// Package identity holds the identity & credential exchange component:
+// verifying agent identity from a Session Identity Token (SIT, see
+// docs/04-identity-authz.md §1.1) and the client side of the Credential
+// Broker's on-behalf-of token exchange (§3). Workload identity via
+// SPIFFE/SPIRE is not implemented — JWTResolver's claim shape is a subset
+// chosen to stay SPIFFE-compatible so a SPIRE-backed implementation can
+// replace it later without changing callers, but SPIRE itself is not
+// integrated. See docs/adr/0007-credential-broker-scope.md for what's
+// deliberately out of scope in this milestone and why.
 package identity
 
 import (
@@ -26,4 +23,11 @@ type Resolver interface {
 	Resolve(ctx context.Context, credential string) (types.Subject, error)
 }
 
-// TODO: not implemented.
+// CredentialBroker mints a short-lived, narrowly-scoped downstream
+// credential for one upstream tool call, given the caller's own verified
+// credential (its SIT) — doc 04 §3's on-behalf-of exchange. The agent
+// itself never sees the result; only the gateway does, and only for the
+// duration of one call.
+type CredentialBroker interface {
+	Exchange(ctx context.Context, subjectCredential, upstream, tool string) (token string, err error)
+}

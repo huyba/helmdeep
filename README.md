@@ -178,11 +178,15 @@ itself is the floor unless the durability guarantee changes.
 
 ## Dependencies and binary size
 
-Two direct dependencies: `github.com/open-policy-agent/opa` (the embedded
-Rego evaluator — see [ADR 0002](docs/adr/0002-policy-engine-choice.md)) and
-`sigs.k8s.io/yaml` (config parsing, which adds *zero* net dependency surface
-— it's already compiled in because OPA's own Rego builtins use it). No CGO,
-no OPA server, no OPA CLI: only the `rego` evaluation package is imported.
+Three direct dependencies, two of which add *zero* net dependency surface
+because they're already compiled in as OPA's own transitive dependencies:
+`github.com/open-policy-agent/opa` (the embedded Rego evaluator — see
+[ADR 0002](docs/adr/0002-policy-engine-choice.md)), `sigs.k8s.io/yaml`
+(config parsing — OPA's Rego builtins use it), and
+`github.com/lestrrat-go/jwx/v3` (Session Identity Tokens and the credential
+broker, Milestone M1 — OPA's `io.jwt.*` Rego builtins use it; see
+[ADR 0007](docs/adr/0007-credential-broker-scope.md)). No CGO, no OPA
+server, no OPA CLI: only the `rego` evaluation package is imported.
 
 The static `linux/amd64` binary is **~23MB**, `-trimpath -ldflags="-s -w"`.
 Most of that is OPA's `topdown` evaluator and its built-in function library
@@ -192,6 +196,7 @@ here rather than glossed over.
 
 ## Repo layout
 
+- `STATUS.md` — what's implemented vs. not, one row per design doc
 - `ARCHITECTURE.md` — component decomposition, interfaces, request flow
 - `ROADMAP.md` — phased plan
 - `docs/adr/` — architecture decision records
@@ -200,12 +205,14 @@ here rather than glossed over.
 - `pkg/types` — shared contracts every component depends on
 - `pkg/mcp` — the MCP wire protocol (JSON-RPC, `_meta`, headers, transport)
 - `pkg/policy`, `pkg/audit` — the PDP and the hash-chained audit log
-- `pkg/identity`, `pkg/modelgw`, `pkg/sandbox`, `pkg/scheduler`, `pkg/controlplane` — interface-only stubs, not implemented
+- `pkg/identity` — SIT verification and the credential broker (Milestone M1); `internal/devissuer` is the dev-only issuer/exchange server it talks to
+- `pkg/modelgw`, `pkg/sandbox`, `pkg/scheduler`, `pkg/controlplane` — interface-only stubs, not implemented
 - `internal/gateway` — the Tool Gateway's business logic
 - `cmd/helmdeep-gateway` — the product binary
 - `internal/mockupstream`, `cmd/mock-upstream` — test/demo fixtures, not part of the product
 - `examples/policies`, `examples/quickstart` — the worked example above, runnable
-- `test/e2e` — end-to-end tests against the fixtures above
+- `test/e2e` — end-to-end tests against the fixtures above (including identity/credential-broker tests)
+- `test/adversarial` — tests named after real threats, mapped to OWASP ASI codes
 
 ## Contributing
 

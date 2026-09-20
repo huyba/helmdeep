@@ -37,11 +37,18 @@ Scope:
 
 ## Phase 2 — Identity & credential exchange
 
-Fills in `pkg/identity` for real: SPIFFE/SPIRE workload identity, OBO token
-exchange, and a credential broker minting just-in-time scoped credentials
-(`docs/04-identity-authz.md`). Replaces Phase 1's static token map in
-`internal/gateway` with this package, behind the same `Resolver` interface —
-the gateway's calling code should not need to change.
+**Partially delivered (Milestone M1).** `pkg/identity.JWTResolver` verifies
+signed Session Identity Tokens; `pkg/identity.HTTPCredentialBroker` mints
+per-call scoped credentials via `internal/devissuer`'s self-contained
+token exchange. Exactly the "behind the same `Resolver` interface, the
+gateway's calling code should not need to change" property this section
+originally called for held — see `docs/adr/0007-credential-broker-scope.md`.
+
+Still open: real SPIFFE/SPIRE workload identity (the current
+`JWTResolver` is SPIFFE-*compatible*, not SPIFFE-*backed*), revocation
+(`docs/04-identity-authz.md` §5's bloom filter and <5s propagation target),
+and Enterprise IdP integration (§6) — the human hop in a delegation chain
+is asserted by the dev issuer today, not independently verified.
 
 ## Phase 3 — Model Gateway
 
