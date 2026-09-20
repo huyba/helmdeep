@@ -36,7 +36,7 @@ const (
 // startMockUpstream returns both the httptest server (for the gateway to
 // call) and the underlying *mockupstream.Server (so a test can inspect
 // what it actually received — see mockupstream.RecordedCall).
-func startMockUpstream(t *testing.T, profile string) (*httptest.Server, *mockupstream.Server) {
+func startMockUpstream(t testing.TB, profile string) (*httptest.Server, *mockupstream.Server) {
 	t.Helper()
 	h, err := mockupstream.NewHandler(profile)
 	if err != nil {
@@ -58,7 +58,7 @@ type mockUpstreams struct {
 // gateway's HTTP endpoint, its audit store (so a test can call Verify
 // directly instead of shelling out to `verify-chain`), and a spy on each
 // mock upstream.
-func newTestGateway(t *testing.T) (endpoint string, auditStore *audit.FileStore, mocks mockUpstreams) {
+func newTestGateway(t testing.TB) (endpoint string, auditStore *audit.FileStore, mocks mockUpstreams) {
 	t.Helper()
 	return newTestGatewayWithPolicy(t, mustAbs(t, "../../examples/policies"))
 }
@@ -67,7 +67,7 @@ func newTestGateway(t *testing.T) (endpoint string, auditStore *audit.FileStore,
 // a parameter, so a test that needs behavior the public example bundle
 // doesn't demonstrate (e.g. obligations/redaction) can point at its own
 // fixture under test/e2e/testdata/ instead.
-func newTestGatewayWithPolicy(t *testing.T, policyPath string) (endpoint string, auditStore *audit.FileStore, mocks mockUpstreams) {
+func newTestGatewayWithPolicy(t testing.TB, policyPath string) (endpoint string, auditStore *audit.FileStore, mocks mockUpstreams) {
 	t.Helper()
 
 	kbTS, kb := startMockUpstream(t, "knowledgebase")
@@ -117,7 +117,7 @@ func newTestGatewayWithPolicy(t *testing.T, policyPath string) (endpoint string,
 	return ts.URL + "/mcp", auditStore, mocks
 }
 
-func mustAbs(t *testing.T, path string) string {
+func mustAbs(t testing.TB, path string) string {
 	t.Helper()
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -129,7 +129,7 @@ func mustAbs(t *testing.T, path string) string {
 // call sends one MCP request exactly as a conforming 2026-07-28 client
 // would — real headers, real `_meta` — and returns the decoded top-level
 // JSON-RPC response.
-func call(t *testing.T, endpoint, token, method, name string, params map[string]any) map[string]any {
+func call(t testing.TB, endpoint, token, method, name string, params map[string]any) map[string]any {
 	t.Helper()
 	if params == nil {
 		params = map[string]any{}
@@ -171,12 +171,12 @@ func call(t *testing.T, endpoint, token, method, name string, params map[string]
 	return out
 }
 
-func callTool(t *testing.T, endpoint, token, tool string, arguments map[string]any) map[string]any {
+func callTool(t testing.TB, endpoint, token, tool string, arguments map[string]any) map[string]any {
 	t.Helper()
 	return call(t, endpoint, token, "tools/call", tool, map[string]any{"name": tool, "arguments": arguments})
 }
 
-func resultOf(t *testing.T, resp map[string]any) map[string]any {
+func resultOf(t testing.TB, resp map[string]any) map[string]any {
 	t.Helper()
 	if e, ok := resp["error"]; ok {
 		t.Fatalf("expected a result, got JSON-RPC error: %v", e)
@@ -468,14 +468,14 @@ decision := {"outcome": "allow", "policy_id": "test.allow"}
 	}
 }
 
-func writeFile(t *testing.T, path, content string) {
+func writeFile(t testing.TB, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
 
-func readAuditRecords(t *testing.T, path string) []types.ActionRecord {
+func readAuditRecords(t testing.TB, path string) []types.ActionRecord {
 	t.Helper()
 	data, err := os.ReadFile(path) // #nosec G304 -- test's own t.TempDir() fixture
 	if err != nil {

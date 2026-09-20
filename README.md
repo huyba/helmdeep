@@ -108,20 +108,73 @@ real HTTP against mock upstream servers.
 
 ## Performance
 
-`go test ./pkg/policy/... -run '^$' -bench BenchmarkDecide -benchmem`
-measures the number that actually matters — added latency of one policy
-decision against the real, loaded three-policy-type bundle above, not the
-surrounding HTTP/JSON overhead:
+All numbers below: Apple M1 Max, macOS, local SSD, `go test -bench`. Real
+production numbers will differ, especially the audit write (disk/volume
+dependent) and the upstream call (network-dependent) — rerun these on your
+own hardware before trusting them for capacity planning.
+
+**Policy decision latency** (`go test ./pkg/policy/... -bench BenchmarkDecide$`)
+— the number `ROADMAP.md`'s sub-5ms target is actually about, in isolation
+from HTTP, identity, and I/O:
 
 ```text
-BenchmarkDecide-10    32653    74094 ns/op    30880 B/op    623 allocs/op
+BenchmarkDecide-10    29874    79625 ns/op    30831 B/op    622 allocs/op
 ```
 
-~74µs per decision on an Apple M1 Max — well inside the sub-5ms target
-(`ROADMAP.md`). This is the policy evaluation cost in isolation; total
-request latency also includes HTTP parsing, identity resolution, the audit
-write, and the upstream call, which this benchmark deliberately excludes so
-the number stays meaningful as those other pieces change.
+~80µs against the real three-policy-type bundle (scope + taint + limits
+combined) — about 60x under target.
+
+**Policy set scaling** (`go test ./pkg/policy/... -bench BenchmarkDecideScaling`)
+— does decision latency degrade as a deployment's rule count grows? Each
+case decides against the *last* rule in a synthetic bundle of 10, 100, or
+1000 independent scope rules:
+
+```text
+BenchmarkDecideScaling/10_rules-10      37843    29832 ns/op
+BenchmarkDecideScaling/100_rules-10     38320    33657 ns/op
+BenchmarkDecideScaling/1000_rules-10    34581    32977 ns/op
+```
+
+Flat. A 100x increase in rule count moved latency by roughly noise — OPA
+indexes the equality comparisons these rules are built from, so this
+isn't a linear scan, and shouldn't be a scaling concern until a bundle's
+shape looks very different from "many independent equality rules."
+
+**Gateway overhead vs. calling the mock upstream directly**
+(`go test ./test/e2e/... -bench .`) — the full round trip (identity
+resolution, a real policy decision, a durable audit write, the forwarded
+call) against the same call with nothing in front of it:
+
+```text
+BenchmarkDirectUpstreamCall-10    14391    81784 ns/op
+BenchmarkGatewayOverhead-10         274   5822871 ns/op
+```
+
+~82µs direct, ~5.8ms through the gateway — roughly 70x, which sounds far
+worse than the 15% platform-overhead target in `ROADMAP.md` until you find
+out where the time actually goes. Isolating the audit write
+(`go test ./pkg/audit/... -bench BenchmarkAppend`):
+
+```text
+BenchmarkAppend-10    310    3770145 ns/op
+```
+
+~3.8ms — the large majority of the gateway's overhead is the `fsync` in
+every durable audit write, not policy evaluation (~80µs) or HTTP handling.
+This is the tradeoff `docs/adr/0003-fail-closed-behavior.md` and
+`docs/adr/0004-action-record-format.md` describe on purpose: the gateway
+does not proceed with a call until the decision recording it is durable on
+disk. It is a real cost, stated honestly here rather than buried in an
+aggregate number — and it's why the 15% target in `ROADMAP.md` is
+expressed relative to a real agent's model+compute spend (typically
+hundreds of milliseconds to seconds per call), not relative to a
+microsecond-scale mock upstream: a few milliseconds of durable-write
+latency is a rounding error against an LLM call and a real network hop to
+a production API, and a 70x multiple against an 82µs baseline is not the
+same claim as a 70x multiple against a real call's actual latency.
+Keeping the audit file descriptor open across calls (rather than
+open-close on every append) would trim some fixed overhead; the `fsync`
+itself is the floor unless the durability guarantee changes.
 
 ## Dependencies and binary size
 
