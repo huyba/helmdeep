@@ -1,0 +1,48 @@
+# Non-secret gateway config. Upstream bearer tokens are deliberately NOT
+# here — config.go's `bearer_token_env` field names an environment
+# variable for each upstream's credential, and secret.yaml supplies those
+# as env vars instead. Never put a real credential in a ConfigMap: it's
+# stored unencrypted in etcd and readable by anyone who can `kubectl get
+# configmap` in the namespace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helmdeep-gateway-config
+  labels:
+    app.kubernetes.io/name: helmdeep-gateway
+data:
+  config.yaml: |
+    listen: ":8443"
+    path: "/mcp"
+
+    policy:
+      path: /etc/helmdeep/policies
+      # decision_timeout: "50ms"   # uncomment once a real (non-embedded) PDP can hang
+
+    audit:
+      path: /data/audit.log
+
+    # Replace with real upstream services once they exist. bearer_token_env
+    # names an env var (see secret.yaml) — the token itself never appears
+    # in this ConfigMap.
+    upstreams: []
+---
+# The Rego policy bundle, as its own ConfigMap so it can be updated (and
+# SIGHUP-reloaded, see cmd/helmdeep-gateway) independently of the rest of
+# the config. Replace with your real bundle; this is examples/policies/'s
+# deny-by-default shape so a fresh deployment starts closed, not open.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helmdeep-gateway-policy
+  labels:
+    app.kubernetes.io/name: helmdeep-gateway
+data:
+  decision.rego: |
+    package helmdeep.authz
+
+    default decision := {
+      "outcome": "deny",
+      "policy_id": "default.deny",
+      "reason": "no policy configured for this deployment yet",
+    }

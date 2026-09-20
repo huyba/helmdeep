@@ -1,0 +1,128 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helmdeep-gateway
+  labels:
+    app.kubernetes.io/name: helmdeep-gateway
+spec:
+  # Not >1 yet: internal/gateway's usageTracker (aggregate rate limits) and
+  # the provenance cache (internal/gateway/provenance.go) are in-process,
+  # per-pod state with no cross-replica coordination. Running >1 replica
+  # today silently divides an agent's rate limit across however many pods
+  # happen to answer its calls, and provenance learned by one replica is
+  # invisible to another. Fix that (shared state, e.g. Redis-backed, or
+  # accept the current per-pod semantics explicitly) before scaling out —
+  # this is a real limitation, not a placeholder comment.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: helmdeep-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: helmdeep-gateway
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532 # matches distroless/static-debian12:nonroot's "nonroot" user
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: helmdeep-gateway
+          image: helmdeep-gateway:latest # replace with your registry/tag; do not run `latest` in a real environment
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "-config=/etc/helmdeep/config.yaml"]
+          ports:
+            - name: mcp
+              containerPort: 8443
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # One entry per upstream's `bearer_token_env` in
+            # configmap.yaml's config.yaml. secret.yaml is the example;
+            # add/remove keyRefs to match your real upstream list.
+            - name: EXAMPLE_UPSTREAM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: helmdeep-gateway-secrets
+                  key: EXAMPLE_UPSTREAM_TOKEN
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /etc/helmdeep/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: policy
+              mountPath: /etc/helmdeep/policies
+              readOnly: true
+            # readOnlyRootFilesystem above means the container's own
+            # filesystem can't take the audit log — it needs a real
+            # writable mount. emptyDir here means the ledger does NOT
+            # survive a pod restart or reschedule; replace with a
+            # PersistentVolumeClaim before this holds anything you need to
+            # keep, and see docs/adr/0004-action-record-format.md for why
+            # losing the chain's tail on restart is a real gap, not a
+            # cosmetic one.
+            - name: data
+              mountPath: /data
+          # No dedicated health endpoint exists yet (pkg/mcp.Server only
+          # serves the MCP path) — TCP probes are the honest default until
+          # one does. A real readiness check (confirm the policy bundle
+          # loaded, the audit log is writable) would be a meaningfully
+          # better signal than "the port accepts connections."
+          readinessProbe:
+            tcpSocket:
+              port: mcp
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: mcp
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              # Starting point for a low-traffic gateway instance, not a
+              # measured production number — revise from real metrics.
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              # Memory: request == limit on purpose. Memory isn't
+              # compressible the way CPU is — a pod that's scheduled
+              # assuming 128Mi but allowed to balloon to some much larger
+              # limit can push its node into memory pressure for
+              # *everything else* on that node before this pod itself
+              # ever hits its own limit. Keeping them equal means the
+              # scheduler's placement decision and the pod's actual
+              # ceiling are the same number. If this pod OOMKills, that's
+              # a signal to raise both, not to widen the gap.
+              memory: 128Mi
+              # CPU: limit is well above the request, deliberately, not
+              # equal to it. A CPU *limit* is enforced via the kernel CFS
+              # quota — a hard, hard-to-diagnose throttle applied even
+              # when the node has spare CPU sitting idle. Setting the
+              # limit close to typical usage is the single most common
+              # cause of "requests get slow under load with no error in
+              # the logs and CPU usage graphs that look fine." Give real
+              # headroom for bursts (a policy hot-reload, a spike in
+              # concurrent tools/call decisions) and let cluster-level
+              # bin-packing, not a per-pod throttle, be the thing that
+              # decides contention.
+              cpu: "1"
+      volumes:
+        - name: config
+          configMap:
+            name: helmdeep-gateway-config
+        - name: policy
+          configMap:
+            name: helmdeep-gateway-policy
+        - name: data
+          emptyDir: {}
