@@ -1,0 +1,19 @@
+# Force LF regardless of a contributor's local core.autocrlf setting.
+# gofmt (and golangci-lint's gofmt check) reject CRLF line endings; without
+# this, a contributor on a machine with core.autocrlf=true (common on
+# Windows, and possible on macOS depending on global git config) gets a
+# working copy that fails `make lint` locally even though the committed
+# object is correctly LF-formatted — confusing, and easy to mistake for a
+# real CI failure.
+* text=auto eol=lf
+
+*.go text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.rego text eol=lf
+Makefile text eol=lf
+
+# Binary-ish or intentionally-foreign-format files: leave alone.
+*.png binary
+*.jpg binary
