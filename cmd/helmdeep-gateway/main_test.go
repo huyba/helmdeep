@@ -16,9 +16,10 @@ import (
 func TestCheckDevInsecureGate(t *testing.T) {
 	staticConfigured := config{}
 	staticConfigured.Identity.StaticTokens = map[string]struct {
-		ID         string `json:"id"`
-		Kind       string `json:"kind"`
-		TrustLevel int    `json:"trust_level"`
+		ID         string   `json:"id"`
+		Kind       string   `json:"kind"`
+		TrustLevel int      `json:"trust_level"`
+		Scopes     []string `json:"scopes"`
 	}{"tok": {ID: "agent:test"}}
 
 	tests := []struct {

@@ -132,7 +132,11 @@ func runServe(args []string) error {
 	if err != nil {
 		return err // already validated in loadConfig; defensive
 	}
-	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance(), decisionTimeout, broker)
+	toolReg, err := cfg.toolRegistry()
+	if err != nil {
+		return err // already validated in loadConfig; defensive
+	}
+	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance(), decisionTimeout, broker, toolReg)
 	server := mcp.NewServer(cfg.Listen, cfg.Path, gw, version)
 
 	// SIGHUP reloads the policy bundle without restarting the gateway or

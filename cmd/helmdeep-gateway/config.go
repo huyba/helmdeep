@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/huyba/helmdeep/internal/gateway"
+	"github.com/huyba/helmdeep/pkg/toolregistry"
 	"github.com/huyba/helmdeep/pkg/types"
 )
 
@@ -44,9 +45,10 @@ type config struct {
 		// is refused at startup unless the -dev-insecure flag is passed —
 		// see main.go's runServe. Prefer JWT below for anything else.
 		StaticTokens map[string]struct {
-			ID         string `json:"id"`
-			Kind       string `json:"kind"`
-			TrustLevel int    `json:"trust_level"`
+			ID         string   `json:"id"`
+			Kind       string   `json:"kind"`
+			TrustLevel int      `json:"trust_level"`
+			Scopes     []string `json:"scopes"`
 		} `json:"static_tokens"`
 
 		// JWT configures the real identity path: Session Identity Tokens
@@ -76,6 +78,19 @@ type config struct {
 			Trusted bool   `json:"trusted"`
 		} `json:"provenance"`
 	} `json:"upstreams"`
+
+	// Tools is the Tool Registry (docs/05-tool-gateway.md §1,
+	// pkg/toolregistry, Milestone M2): every tool this deployment declares.
+	// A tool absent from this list is refused outright, regardless of
+	// whether an upstream exposes it — see internal/gateway.Gateway's
+	// toolReg field and docs/adr/0008-tool-registry.md.
+	Tools []struct {
+		ID          string   `json:"id"`
+		Upstream    string   `json:"upstream"`
+		Risk        string   `json:"risk"`
+		DataClasses []string `json:"data_classes"`
+		Scopes      []string `json:"scopes"`
+	} `json:"tools"`
 }
 
 func loadConfig(path string) (config, error) {
@@ -105,6 +120,9 @@ func loadConfig(path string) (config, error) {
 	}
 	if _, err := cfg.decisionTimeout(); err != nil {
 		return config{}, fmt.Errorf("config %s: policy.decision_timeout: %w", path, err)
+	}
+	if _, err := cfg.toolRegistry(); err != nil {
+		return config{}, fmt.Errorf("config %s: tools: %w", path, err)
 	}
 	hasStatic := len(cfg.Identity.StaticTokens) > 0
 	hasJWT := cfg.Identity.JWT != nil
@@ -139,6 +157,7 @@ func (c config) staticIdentities() map[string]gateway.StaticIdentity {
 			ID:         id.ID,
 			Kind:       types.SubjectKind(id.Kind),
 			TrustLevel: id.TrustLevel,
+			Scopes:     id.Scopes,
 		}
 	}
 	return out
@@ -152,4 +171,22 @@ func (c config) upstreamProvenance() map[string]types.Provenance {
 		out[u.Name] = types.Provenance{Source: u.Provenance.Source, Trusted: u.Provenance.Trusted}
 	}
 	return out
+}
+
+// toolRegistry builds the Tool Registry gateway.New requires from the
+// config's tools section. An empty (but non-nil) registry is a valid
+// config — it just refuses every tool call, per
+// docs/05-tool-gateway.md §1's fail-closed default.
+func (c config) toolRegistry() (*toolregistry.Registry, error) {
+	entries := make([]toolregistry.Entry, len(c.Tools))
+	for i, t := range c.Tools {
+		entries[i] = toolregistry.Entry{
+			ToolID:      t.ID,
+			Upstream:    t.Upstream,
+			Risk:        toolregistry.RiskRating(t.Risk),
+			DataClasses: t.DataClasses,
+			Scopes:      t.Scopes,
+		}
+	}
+	return toolregistry.New(entries)
 }
