@@ -34,7 +34,7 @@ controls.
 | Policy Decision Point (PDP) | **Implemented** — embedded OPA/Rego engine | `pkg/policy` |
 | Audit / Action Record store | **Implemented** — file-backed, hash-chained | `pkg/audit` |
 | MCP protocol handling | **Implemented** — Streamable HTTP, 2026-07-28 spec | `pkg/mcp` |
-| Identity & credential exchange | Interface only — no implementation | `pkg/identity` |
+| Identity & credential exchange | **Partial** — real JWT verification + credential broker (Milestone M1) | `pkg/identity`, `internal/devissuer` |
 | Model Gateway | Interface only — no implementation | `pkg/modelgw` |
 | Agent sandbox runtime | Interface only — no implementation | `pkg/sandbox` |
 | Scheduler | Interface only — no implementation | `pkg/scheduler` |
@@ -117,38 +117,41 @@ JSON-RPC framing, error codes) and knows nothing about policy or identity;
 policy-and-identity-shaped. A transport bug and a policy bug should never
 be found in the same file.
 
-### Identity & credential exchange — stub
+### Identity & credential exchange — partial (Milestone M1)
 
-**Responsibility (future).** Workload identity (SPIFFE/SPIRE), on-behalf-of
-token exchange, and a credential broker that mints just-in-time, narrowly
-scoped credentials — see `docs/04-identity-authz.md`.
+**Responsibility.** Verify caller identity from a signed Session Identity
+Token (SIT), and mint just-in-time, narrowly scoped, per-call credentials
+for upstream calls instead of an upstream ever seeing an agent's own token
+— see `docs/04-identity-authz.md` §1.1 and §3. Workload identity via real
+SPIFFE/SPIRE and Enterprise IdP integration (§6) are not implemented; see
+`docs/adr/0007-credential-broker-scope.md` for the complete list of what's
+simplified in this milestone and why.
 
-**Interface.** `pkg/identity.Resolver` (`Resolve(credential) -> Subject`).
+**Interface.** `pkg/identity.Resolver` (`Resolve(credential) -> Subject`),
+`pkg/identity.CredentialBroker` (`Exchange(credential, upstream, tool) ->
+token`).
 
-**Interaction.** The Tool Gateway needs *some* way to turn a presented
-credential into a `Subject` to build Step 2, but that's not this component:
-Step 2 uses a minimal static token→identity map that lives in
-`internal/gateway` and happens to satisfy `Resolver`. That keeps
-`pkg/identity` itself untouched and honestly "not implemented" — the real
-SPIFFE/OBO implementation can replace the gateway's bootstrap resolver later
-without the gateway's calling code changing. Defining `Resolver` is not
-implementing the component; the stub rule is about behavior, not about
-whether an interface exists.
+**Implementations.** `pkg/identity.JWTResolver` verifies a SIT's signature
+against a JWKS and extracts the agent principal and delegation chain.
+`pkg/identity.HTTPCredentialBroker` calls an RFC-8693-shaped token-exchange
+endpoint. `internal/devissuer` is the dev-only issuer/exchange server both
+talk to in Phase 0 — see its own doc comment for why it plays both an
+identity provider's and an authorization server's role at once.
+`internal/gateway.StaticTokenResolver` remains as a dev/test fallback,
+gated behind `cmd/helmdeep-gateway serve -dev-insecure`.
 
-Two things this repo enforces so that swap is real and not aspirational:
+**Interaction.** The gateway depends on `identity.Resolver` and
+`identity.CredentialBroker` — the interfaces, never a concrete
+implementation — so swapping `JWTResolver` for a future SPIRE-backed
+resolver, or `HTTPCredentialBroker` for a real external AS client, is a
+wiring change in `cmd/helmdeep-gateway`'s `main`, not a change to
+`internal/gateway`.
 
-1. The gateway depends on `identity.Resolver` (the interface), not on the
-   static map's concrete type. It receives a `Resolver` through its
-   constructor (`gateway.New(..., identity identity.Resolver, ...)`) — there
-   is no code path in `internal/gateway` that references the static
-   resolver by name. Wiring the static resolver into the gateway happens
-   exactly once, in `cmd/helmdeep-gateway`'s `main`. Replacing it with a
-   real identity provider later is a one-line change there, not surgery on
-   the gateway.
-2. The static resolver logs a warning on startup — "static token identity
-   resolver active: development/test only, do not run in production" — and
-   its doc comment says the same. It is a bootstrap convenience, not a
-   security feature, and it should be impossible to mistake it for one.
+The static resolver logs a warning on startup — "static token identity
+resolver active: development/test only, do not run in production" — and
+its doc comment says the same, on top of the `-dev-insecure` flag gate
+itself. It is a bootstrap convenience, not a security feature, and it
+should be impossible to mistake it for one.
 
 ### Model Gateway, Agent sandbox runtime, Scheduler, Control plane — stubs
 

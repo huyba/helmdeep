@@ -54,6 +54,15 @@ type Gateway struct {
 	// like any other Decide error: deny.
 	decisionTimeout time.Duration
 
+	// broker mints a per-call, scoped, expiring downstream credential from
+	// the caller's own verified credential (docs/04-identity-authz.md §3)
+	// — see docs/adr/0007-credential-broker-scope.md. Nil is a valid,
+	// supported configuration: upstreams then use whatever static
+	// credential they were configured with (pkg/mcp.HTTPUpstream's
+	// pre-Milestone-M1 behavior), which remains correct for an upstream
+	// that genuinely has no finer-grained credential to hand out.
+	broker identity.CredentialBroker
+
 	usage *usageTracker
 	prov  *provenanceCache
 	now   func() time.Time
@@ -62,9 +71,10 @@ type Gateway struct {
 // New builds a Gateway from its dependencies. identity, pdp, auditLog, and
 // registry are all interfaces; see the type's doc comment for why that
 // matters. upstreamProvenance maps upstream name to the provenance label
-// applied to values it returns — see the field's doc comment. decisionTimeout
-// bounds each policy decision; pass 0 for no bound.
-func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registry mcp.Registry, upstreamProvenance map[string]types.Provenance, decisionTimeout time.Duration) *Gateway {
+// applied to values it returns — see the field's doc comment.
+// decisionTimeout bounds each policy decision; pass 0 for no bound. broker
+// may be nil — see the field's doc comment.
+func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registry mcp.Registry, upstreamProvenance map[string]types.Provenance, decisionTimeout time.Duration, broker identity.CredentialBroker) *Gateway {
 	return &Gateway{
 		identity:           id,
 		pdp:                pdp,
@@ -72,6 +82,7 @@ func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registr
 		registry:           registry,
 		upstreamProvenance: upstreamProvenance,
 		decisionTimeout:    decisionTimeout,
+		broker:             broker,
 		usage:              newUsageTracker(),
 		prov:               newProvenanceCache(),
 		now:                time.Now,
@@ -209,7 +220,32 @@ func (g *Gateway) CallTool(ctx context.Context, cc mcp.CallContext, name string,
 		return deniedResult(reason), nil
 	}
 
-	result, callErr := upstream.CallTool(ctx, types.ToolCall{Tool: name, Arguments: action.Arguments})
+	credential := ""
+	if g.broker != nil {
+		minted, err := g.broker.Exchange(ctx, cc.Credential, upstream.Name(), name)
+		if err != nil {
+			// The decision was Allowed, but we could not obtain a scoped
+			// credential to act on it with — proceeding on some other,
+			// less-scoped credential would defeat the entire point of
+			// having a broker configured. Fail closed here exactly like
+			// every other operational failure — see
+			// docs/adr/0006-operational-failure-classification.md.
+			exchangeErr := err
+			if err := g.auditLog.Append(ctx, types.ActionRecord{
+				Timestamp: g.now(),
+				Subject:   subject,
+				Action:    action,
+				Decision:  decision,
+				Outcome:   types.RecordOutcomeFailed,
+			}); err != nil {
+				slog.Error("failed to record credential exchange failure", "tool", name, "error", err)
+			}
+			return failedResult("could not obtain a scoped upstream credential: " + exchangeErr.Error()), nil
+		}
+		credential = minted
+	}
+
+	result, callErr := upstream.CallTool(ctx, types.ToolCall{Tool: name, Arguments: action.Arguments, Credential: credential})
 	if callErr != nil {
 		// The decision was Allowed and already recorded as such; this is a
 		// second, separate record for the distinct fact that the upstream

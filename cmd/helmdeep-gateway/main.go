@@ -15,9 +15,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/lestrrat-go/jwx/v3/jwk"
 
 	"github.com/huyba/helmdeep/internal/gateway"
 	"github.com/huyba/helmdeep/pkg/audit"
+	"github.com/huyba/helmdeep/pkg/identity"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
 )
@@ -61,6 +65,7 @@ commands:
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "path to the gateway's YAML config file")
+	devInsecure := fs.Bool("dev-insecure", false, "allow identity.static_tokens (unverifiable dev/test identity). Refused without this flag.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -70,7 +75,32 @@ func runServe(args []string) error {
 		return err
 	}
 
-	identityResolver := gateway.NewStaticTokenResolver(cfg.staticIdentities())
+	var identityResolver identity.Resolver
+	var broker identity.CredentialBroker
+	switch {
+	case cfg.Identity.JWT != nil:
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		keySet, err := jwk.Fetch(ctx, cfg.Identity.JWT.JWKSURL)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("fetch identity.jwt.jwks_url %s: %w", cfg.Identity.JWT.JWKSURL, err)
+		}
+		identityResolver = identity.NewJWTResolver(keySet, cfg.Identity.JWT.Audience)
+		if cfg.Identity.JWT.ExchangeURL != "" {
+			broker = identity.NewHTTPCredentialBroker(cfg.Identity.JWT.ExchangeURL)
+		}
+	case len(cfg.Identity.StaticTokens) > 0:
+		if err := checkDevInsecureGate(cfg, *devInsecure); err != nil {
+			return err
+		}
+		identityResolver = gateway.NewStaticTokenResolver(cfg.staticIdentities())
+	default:
+		// loadConfig's own validation makes this unreachable, but the
+		// switch has no default identity source to fall back to, so a
+		// future change to that validation must not silently start the
+		// gateway with a nil Resolver.
+		return fmt.Errorf("no identity source configured")
+	}
 
 	pdp := policy.NewOPADecider()
 	if err := pdp.Load(cfg.Policy.Path); err != nil {
@@ -102,7 +132,7 @@ func runServe(args []string) error {
 	if err != nil {
 		return err // already validated in loadConfig; defensive
 	}
-	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance(), decisionTimeout)
+	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance(), decisionTimeout, broker)
 	server := mcp.NewServer(cfg.Listen, cfg.Path, gw, version)
 
 	// SIGHUP reloads the policy bundle without restarting the gateway or
@@ -122,6 +152,19 @@ func runServe(args []string) error {
 
 	slog.Info("helmdeep-gateway starting", "listen", cfg.Listen, "path", cfg.Path, "version", version)
 	return server.Serve(ctx)
+}
+
+// checkDevInsecureGate is the security-relevant decision, isolated from
+// the I/O (JWKS fetch, resolver construction) around it so it's directly
+// unit-testable: static-token identity is unverifiable and must never run
+// without an explicit, deliberate opt-in. loadConfig already refuses
+// identity.static_tokens and identity.jwt configured together, so this
+// check only ever applies when static_tokens is the sole identity source.
+func checkDevInsecureGate(cfg config, devInsecure bool) error {
+	if len(cfg.Identity.StaticTokens) > 0 && !devInsecure {
+		return fmt.Errorf("identity.static_tokens is configured but -dev-insecure was not passed; static-token identity is unverifiable and must not run without an explicit opt-in")
+	}
+	return nil
 }
 
 func runVerifyChain(args []string) error {

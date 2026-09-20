@@ -66,10 +66,16 @@ Be precise about these — a false sense of coverage is worse than a known gap:
   injection *mitigation* inside the model loop, that's out of scope for this
   component; this component assumes injection succeeds sometimes and limits
   the blast radius from outside.
-- **Identity and credential exchange are not implemented.** `pkg/identity`
-  is an interface-only stub (see `ARCHITECTURE.md`); Phase 1's identity
-  resolution is a static token→identity map suitable for development and
-  evaluation, explicitly not for production use, until Phase 2 replaces it.
+- **Identity verification exists but is narrower than the full design.**
+  `pkg/identity.JWTResolver` cryptographically verifies the agent principal
+  in a Session Identity Token; the human/user hop in its delegation chain
+  is an asserted claim, not independently checked against a real Enterprise
+  IdP (none exists yet). No SPIRE integration, no revocation — a
+  compromised token is valid until it expires. The pre-M1 static
+  token→identity map still exists for development, now gated behind
+  `-dev-insecure` and logging a warning when active. See
+  `docs/adr/0007-credential-broker-scope.md` for the complete list of
+  what's simplified and `STATUS.md` for current status.
 - **Confidentiality of policy bundle contents or the audit log at rest.**
   Neither is encrypted by this project; that's a deployment-environment
   responsibility today.
