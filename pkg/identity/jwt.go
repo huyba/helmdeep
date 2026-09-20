@@ -18,11 +18,13 @@ import (
 // never holds a private key — only internal/devissuer (or, later, a real
 // SPIRE-backed issuer) does.
 //
-// Claims read: `agent` (required — the agent definition ID) and
+// Claims read: `agent` (required — the agent definition ID),
 // `delegation_chain` (optional — an ordered list of principal identifiers,
-// outermost first). The signature and `exp`/`aud` are verified by the
-// underlying jwt.Parse call; a Subject is only ever returned for a token
-// whose signature and standard claims both check out.
+// outermost first), and `scope` (optional — the scopes this token grants,
+// types.Subject.Scopes; docs/04-identity-authz.md §1.1). The signature and
+// `exp`/`aud` are verified by the underlying jwt.Parse call; a Subject is
+// only ever returned for a token whose signature and standard claims both
+// check out.
 type JWTResolver struct {
 	keySet   jwk.Set
 	audience string
@@ -45,6 +47,7 @@ func (r *JWTResolver) Resolve(ctx context.Context, credential string) (types.Sub
 		jwt.WithAudience(r.audience),
 		jwt.WithContext(ctx),
 		jwt.WithTypedClaim("delegation_chain", []string{}),
+		jwt.WithTypedClaim("scope", []string{}),
 	)
 	if err != nil {
 		return types.Subject{}, fmt.Errorf("credential invalid: %w", err)
@@ -58,10 +61,14 @@ func (r *JWTResolver) Resolve(ctx context.Context, credential string) (types.Sub
 	var chain []string
 	_ = tok.Get("delegation_chain", &chain) // optional; absence isn't an error
 
+	var scope []string
+	_ = tok.Get("scope", &scope) // optional; absence isn't an error
+
 	return types.Subject{
 		ID:              agentID,
 		Kind:            types.SubjectKindAgent,
 		DelegationChain: chain,
+		Scopes:          scope,
 	}, nil
 }
 

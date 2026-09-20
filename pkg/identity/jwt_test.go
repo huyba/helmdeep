@@ -18,7 +18,7 @@ func TestJWTResolver_ValidTokenResolves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("devissuer.New: %v", err)
 	}
-	token, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com", "agent:finance-bot"}, 15*time.Minute)
+	token, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com", "agent:finance-bot"}, []string{"supplier.read"}, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -33,6 +33,9 @@ func TestJWTResolver_ValidTokenResolves(t *testing.T) {
 	}
 	if len(subj.DelegationChain) != 2 || subj.DelegationChain[0] != "user:marcus@corp.com" {
 		t.Fatalf("subj.DelegationChain = %v, want [user:marcus@corp.com agent:finance-bot]", subj.DelegationChain)
+	}
+	if len(subj.Scopes) != 1 || subj.Scopes[0] != "supplier.read" {
+		t.Fatalf("subj.Scopes = %v, want [supplier.read]", subj.Scopes)
 	}
 }
 
@@ -56,7 +59,7 @@ func TestJWTResolver_ForgedTokenRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("devissuer.New (attacker): %v", err)
 	}
-	forged, err := attacker.IssueSIT("agent:attacker", nil, 15*time.Minute)
+	forged, err := attacker.IssueSIT("agent:attacker", nil, nil, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -72,7 +75,7 @@ func TestJWTResolver_ExpiredTokenRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("devissuer.New: %v", err)
 	}
-	token, err := iss.IssueSIT("agent:test", nil, -time.Minute) // already expired
+	token, err := iss.IssueSIT("agent:test", nil, nil, -time.Minute) // already expired
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -88,7 +91,7 @@ func TestJWTResolver_WrongAudienceRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("devissuer.New: %v", err)
 	}
-	token, err := iss.IssueSIT("agent:test", nil, 15*time.Minute)
+	token, err := iss.IssueSIT("agent:test", nil, nil, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -109,7 +112,7 @@ func TestJWTResolver_MissingAgentClaimRejected(t *testing.T) {
 	// reachable through IssueSIT — this test documents that the resolver
 	// enforces the claim's presence explicitly rather than relying on
 	// IssueSIT being the only way tokens are minted.
-	if _, err := iss.IssueSIT("", nil, 15*time.Minute); err == nil {
+	if _, err := iss.IssueSIT("", nil, nil, 15*time.Minute); err == nil {
 		t.Fatal("expected IssueSIT to refuse an empty agent ID (documenting the invariant JWTResolver also enforces)")
 	}
 }

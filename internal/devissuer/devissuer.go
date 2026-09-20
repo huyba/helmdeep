@@ -103,13 +103,16 @@ func (i *Issuer) PublicKeySet() jwk.Set { return i.public }
 // IssueSIT mints a Session Identity Token for agentID, carrying
 // delegationChain as an ordered list of principal identifiers (outermost
 // first — a human, then the agents between it and this one; see
-// pkg/types.Subject.DelegationChain's doc comment). Simulates doc 04
-// §1.1's "runtime attests the sandbox... and receives a short-lived SIT"
-// — there is no real sandbox attestation in Phase 0, so this simply signs
-// whatever it's asked to assert. The human hop in delegationChain is
-// therefore an asserted claim, not independently verified against a real
-// IdP — see docs/adr/0007-credential-broker-scope.md.
-func (i *Issuer) IssueSIT(agentID string, delegationChain []string, ttl time.Duration) (string, error) {
+// pkg/types.Subject.DelegationChain's doc comment) and scope as the list
+// of scopes this token grants (pkg/types.Subject.Scopes; doc 04 §1.1's
+// `scope` claim — added in Milestone M2, once pkg/toolregistry gave it a
+// reader). Simulates doc 04 §1.1's "runtime attests the sandbox... and
+// receives a short-lived SIT" — there is no real sandbox attestation in
+// Phase 0, so this simply signs whatever it's asked to assert. The human
+// hop in delegationChain is therefore an asserted claim, not independently
+// verified against a real IdP — see
+// docs/adr/0007-credential-broker-scope.md.
+func (i *Issuer) IssueSIT(agentID string, delegationChain, scope []string, ttl time.Duration) (string, error) {
 	if agentID == "" {
 		return "", fmt.Errorf("agentID is required")
 	}
@@ -124,6 +127,7 @@ func (i *Issuer) IssueSIT(agentID string, delegationChain []string, ttl time.Dur
 		Subject("agent_instance:"+instanceID).
 		Claim("agent", agentID).
 		Claim("delegation_chain", delegationChain).
+		Claim("scope", scope).
 		Audience([]string{i.audience}).
 		IssuedAt(now).
 		Expiration(now.Add(ttl)).

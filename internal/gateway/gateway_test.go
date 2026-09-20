@@ -11,8 +11,22 @@ import (
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
+	"github.com/huyba/helmdeep/pkg/toolregistry"
 	"github.com/huyba/helmdeep/pkg/types"
 )
+
+// mustNewToolRegistry builds a *toolregistry.Registry from entries, failing
+// the test on any validation error — every test in this file that isn't
+// specifically exercising the undeclared-tool gate needs its tools
+// declared, or CallTool would deny them for the wrong reason.
+func mustNewToolRegistry(t *testing.T, entries ...toolregistry.Entry) *toolregistry.Registry {
+	t.Helper()
+	r, err := toolregistry.New(entries)
+	if err != nil {
+		t.Fatalf("toolregistry.New: %v", err)
+	}
+	return r
+}
 
 // stubResolver always resolves to the same subject, regardless of credential.
 type stubResolver struct{ subject types.Subject }
@@ -133,7 +147,8 @@ func newTestGatewayWithOpts(t *testing.T, decider policy.Decider, decisionTimeou
 	}
 
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
-	gw := New(stubResolver{subject: subject}, decider, store, registry, nil, decisionTimeout, nil)
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow})
+	gw := New(stubResolver{subject: subject}, decider, store, registry, nil, decisionTimeout, nil, toolReg)
 	return gw, upstream, store, registry
 }
 
@@ -283,13 +298,110 @@ func TestDenialsProduceAuditRecords(t *testing.T) {
 	}
 }
 
+// TestUndeclaredToolIsDeniedNotProtocolError is Milestone M2's central new
+// invariant: a tool mcp.Registry can genuinely route to (a live upstream
+// really exposes it) but that the Tool Registry has never declared must
+// still be refused — as a policy-shaped denial (isError: true), not the
+// mcp.ProtocolError used for a tool that doesn't exist at all. See
+// docs/05-tool-gateway.md §1 and docs/adr/0008-tool-registry.md.
+func TestUndeclaredToolIsDeniedNotProtocolError(t *testing.T) {
+	upstream := &spyUpstream{name: "test-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	emptyToolReg := mustNewToolRegistry(t) // declares nothing
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, emptyToolReg)
+
+	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
+	if err != nil {
+		t.Fatalf("CallTool returned a protocol error, want a denied tool result: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("a tool absent from the Tool Registry was allowed, despite an explicit policy allow")
+	}
+	if upstream.called {
+		t.Fatal("upstream was called for an undeclared tool")
+	}
+}
+
+// TestUnregisteredToolNeverAppearsInToolsList is the ListTools half of
+// TestUndeclaredToolIsDeniedNotProtocolError: an agent should never even
+// learn an undeclared tool exists, the same principle already established
+// for out-of-scope tools.
+func TestUnregisteredToolNeverAppearsInToolsList(t *testing.T) {
+	upstream := &spyUpstream{name: "test-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	emptyToolReg := mustNewToolRegistry(t) // declares nothing
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, emptyToolReg)
+
+	result, err := gw.ListTools(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(result.Tools) != 0 {
+		t.Fatalf("got %d tools, want 0 — an undeclared tool must never appear in tools/list", len(result.Tools))
+	}
+}
+
+// capturingDecider records the last DecisionRequest it was asked to
+// evaluate, so a test can assert on exactly what the gateway sent —
+// TestActionCarriesToolRegistryMetadata uses it to prove Action.Risk,
+// Action.DataClasses, and Action.RequiredScopes reach the PDP.
+type capturingDecider struct {
+	resp types.DecisionResponse
+	got  *types.DecisionRequest
+}
+
+func (d *capturingDecider) Decide(_ context.Context, req types.DecisionRequest) (types.DecisionResponse, error) {
+	d.got = &req
+	return d.resp, nil
+}
+
+// TestActionCarriesToolRegistryMetadata proves the gateway populates
+// Action.Risk/DataClasses/RequiredScopes from the Tool Registry entry —
+// never from anything the agent or model asserts — before calling Decide.
+// See pkg/types.Action's doc comment and docs/adr/0008-tool-registry.md.
+func TestActionCarriesToolRegistryMetadata(t *testing.T) {
+	upstream := &spyUpstream{name: "test-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{
+		ToolID:      "some.tool",
+		Risk:        toolregistry.RiskHigh,
+		DataClasses: []string{"pii"},
+		Scopes:      []string{"finance.write"},
+	})
+	decider := &capturingDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg)
+
+	if _, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil); err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if decider.got == nil {
+		t.Fatal("Decide was never called")
+	}
+	action := decider.got.Action
+	if action.Risk != "high" {
+		t.Fatalf("action.Risk = %q, want %q", action.Risk, "high")
+	}
+	if len(action.DataClasses) != 1 || action.DataClasses[0] != "pii" {
+		t.Fatalf("action.DataClasses = %v, want [pii]", action.DataClasses)
+	}
+	if len(action.RequiredScopes) != 1 || action.RequiredScopes[0] != "finance.write" {
+		t.Fatalf("action.RequiredScopes = %v, want [finance.write]", action.RequiredScopes)
+	}
+}
+
 // TestUsageWindowResets exercises the aggregate-limit counter directly: a
 // call count that's high within one window must not still count against a
 // caller once the window has genuinely rolled over. This is only
 // deterministic because Gateway.now is an injectable clock — no real
 // sleeping involved.
 func TestUsageWindowResets(t *testing.T) {
-	gw := New(stubResolver{subject: types.Subject{ID: "agent:test"}}, stubDecider{}, mustNewAuditStore(t), &staticRegistry{tool: types.Tool{Name: "t"}, upstream: &spyUpstream{}}, nil, 0, nil)
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "t", Risk: toolregistry.RiskLow})
+	gw := New(stubResolver{subject: types.Subject{ID: "agent:test"}}, stubDecider{}, mustNewAuditStore(t), &staticRegistry{tool: types.Tool{Name: "t"}, upstream: &spyUpstream{}}, nil, 0, nil, toolReg)
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	gw.now = func() time.Time { return base }

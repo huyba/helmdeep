@@ -19,13 +19,13 @@ func TestIssueSITRoundTrips(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	token, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com", "agent:finance-bot"}, 15*time.Minute)
+	token, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com", "agent:finance-bot"}, []string{"supplier.read"}, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
 
 	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(iss.PublicKeySet()), jwt.WithValidate(true), jwt.WithAudience(testAudience),
-		jwt.WithTypedClaim("delegation_chain", []string{}))
+		jwt.WithTypedClaim("delegation_chain", []string{}), jwt.WithTypedClaim("scope", []string{}))
 	if err != nil {
 		t.Fatalf("Parse/verify a token this same issuer minted: %v", err)
 	}
@@ -38,6 +38,10 @@ func TestIssueSITRoundTrips(t *testing.T) {
 	if err := tok.Get("delegation_chain", &chain); err != nil || len(chain) != 2 {
 		t.Fatalf("delegation_chain = %v, err=%v, want 2 entries", chain, err)
 	}
+	var scope []string
+	if err := tok.Get("scope", &scope); err != nil || len(scope) != 1 || scope[0] != "supplier.read" {
+		t.Fatalf("scope = %v, err=%v, want [supplier.read]", scope, err)
+	}
 }
 
 func TestIssueSITRejectsEmptyAgent(t *testing.T) {
@@ -45,7 +49,7 @@ func TestIssueSITRejectsEmptyAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := iss.IssueSIT("", nil, time.Minute); err == nil {
+	if _, err := iss.IssueSIT("", nil, nil, time.Minute); err == nil {
 		t.Fatal("IssueSIT with an empty agent ID should error")
 	}
 }
@@ -58,7 +62,7 @@ func TestExpiredSITFailsVerification(t *testing.T) {
 	fixedNow := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	iss.now = func() time.Time { return fixedNow }
 
-	token, err := iss.IssueSIT("agent:test", nil, time.Minute)
+	token, err := iss.IssueSIT("agent:test", nil, nil, time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -81,7 +85,7 @@ func TestForgedSITFailsVerification(t *testing.T) {
 		t.Fatalf("New (other): %v", err)
 	}
 
-	forged, err := other.IssueSIT("agent:attacker", nil, time.Minute)
+	forged, err := other.IssueSIT("agent:attacker", nil, nil, time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT (other): %v", err)
 	}
@@ -100,7 +104,7 @@ func TestExchangeMintsScopedShortLivedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	sit, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com"}, 15*time.Minute)
+	sit, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com"}, []string{"supplier.read"}, 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
