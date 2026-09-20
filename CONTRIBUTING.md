@@ -27,10 +27,16 @@ first — see `ROADMAP.md` for the intended phase order and rationale.
 
 ```sh
 make build   # go build ./...
-make test    # go test -race ./...
+make test    # go test -race ./... — includes test/e2e and test/adversarial
 make lint    # golangci-lint run
 make bench   # go test -run '^$' -bench . ./...
+make fuzz    # bounded fuzzing of the untrusted-input surfaces; FUZZTIME=30s make fuzz to run longer
 ```
+
+`test/adversarial/` deserves a look before you touch policy or identity
+code: it names each test after a real threat rather than the mechanism
+that defeats it, and doubles as documentation of what this gateway
+actually defends against — see its own README.
 
 All four should pass before opening a PR. CI runs them on every push (see
 `.github/workflows/ci.yml`), plus `govulncheck`.
