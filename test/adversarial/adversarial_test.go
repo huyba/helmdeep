@@ -23,6 +23,7 @@ import (
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
+	"github.com/huyba/helmdeep/pkg/toolregistry"
 	"github.com/huyba/helmdeep/pkg/types"
 )
 
@@ -81,7 +82,24 @@ func startGateway(t *testing.T, policyPath string, identities map[string]gateway
 	}
 
 	resolver := gateway.NewStaticTokenResolver(identities)
-	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil)
+
+	// Register every tool the upstream topology already exposes, at
+	// RiskLow with no data classes or required scopes: this suite is
+	// almost entirely about the policy engine and taint tracking, not the
+	// Tool Registry gate itself, so registering everything keeps each test
+	// focused on what it actually asserts. See test/e2e/gateway_test.go's
+	// registerAllTools for the same convention (duplicated here rather
+	// than shared — see this file's own note on why).
+	var entries []toolregistry.Entry
+	for _, tool := range registry.Tools() {
+		entries = append(entries, toolregistry.Entry{ToolID: tool.Name, Risk: toolregistry.RiskLow})
+	}
+	toolReg, err := toolregistry.New(entries)
+	if err != nil {
+		t.Fatalf("toolregistry.New: %v", err)
+	}
+
+	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil, toolReg)
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "adversarial-test")
 
 	ts := httptest.NewServer(gwServer.Handler())

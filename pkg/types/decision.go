@@ -18,6 +18,19 @@ type Action struct {
 	Tool      string           `json:"tool"`
 	Resource  string           `json:"resource,omitempty"` // the object/record the tool acts on, if the caller identified one
 	Arguments map[string]Value `json:"arguments"`
+
+	// Risk and DataClasses are governance metadata about the tool itself,
+	// not the call — the gateway populates both from
+	// pkg/toolregistry.Entry (Milestone M2), never from anything the agent
+	// or model asserts. A tool absent from the registry never reaches
+	// Decide at all; see docs/adr/0008-tool-registry.md.
+	Risk        string   `json:"risk,omitempty"`
+	DataClasses []string `json:"data_classes,omitempty"`
+	// RequiredScopes is the tool's own required-scope metadata (registry,
+	// not the caller) — a policy compares this against
+	// input.subject.scopes; the gateway does not enforce the comparison
+	// itself, matching how every other policy type in this repo works.
+	RequiredScopes []string `json:"required_scopes,omitempty"`
 }
 
 // Usage carries the running counters a policy needs to enforce aggregate

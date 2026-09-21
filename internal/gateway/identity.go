@@ -33,6 +33,11 @@ type StaticIdentity struct {
 	ID         string
 	Kind       types.SubjectKind
 	TrustLevel int
+	// Scopes mirrors what a real JWT identity's SIT `scope` claim would
+	// grant (pkg/identity.JWTResolver, types.Subject.Scopes) — added so a
+	// static-token deployment can still exercise Milestone M2's
+	// scope-vs-required_scopes policies without standing up JWT identity.
+	Scopes []string
 }
 
 // NewStaticTokenResolver builds a resolver from a fixed token→identity map.
@@ -46,6 +51,7 @@ func NewStaticTokenResolver(tokens map[string]StaticIdentity) *StaticTokenResolv
 			ID:         id.ID,
 			Kind:       id.Kind,
 			TrustLevel: id.TrustLevel,
+			Scopes:     id.Scopes,
 		}
 	}
 	return &StaticTokenResolver{tokens: resolved}

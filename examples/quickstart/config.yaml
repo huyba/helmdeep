@@ -42,3 +42,25 @@ upstreams:
     provenance:
       source: payments
       trusted: false
+
+# Tool Registry (docs/05-tool-gateway.md §1, Milestone M2): every tool this
+# deployment declares. A tool absent here is refused outright, regardless
+# of whether an upstream exposes it — see docs/adr/0008-tool-registry.md.
+# risk/data_classes/scopes are governance metadata a policy can read
+# (input.action.risk, input.action.data_classes, input.action.required_scopes);
+# examples/policies/ doesn't use them yet — see examples/policies-tool-registry/
+# for a bundle that does.
+tools:
+  - id: kb.search
+    upstream: knowledgebase
+    risk: low
+  - id: supplier.get_account
+    upstream: suppliermaster
+    risk: medium
+  - id: email.read_latest
+    upstream: email
+    risk: low
+  - id: payments.wire_transfer
+    upstream: payments
+    risk: high
+    data_classes: ["financial"]

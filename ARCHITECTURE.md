@@ -35,10 +35,11 @@ controls.
 | Audit / Action Record store | **Implemented** — file-backed, hash-chained | `pkg/audit` |
 | MCP protocol handling | **Implemented** — Streamable HTTP, 2026-07-28 spec | `pkg/mcp` |
 | Identity & credential exchange | **Partial** — real JWT verification + credential broker (Milestone M1) | `pkg/identity`, `internal/devissuer` |
+| Tool Registry | **Partial** — risk rating, data classes, required scopes; undeclared-tool refusal enforced (Milestone M2) | `pkg/toolregistry` |
 | Model Gateway | Interface only — no implementation | `pkg/modelgw` |
 | Agent sandbox runtime | Interface only — no implementation | `pkg/sandbox` |
 | Scheduler | Interface only — no implementation | `pkg/scheduler` |
-| Control plane | Interface only — no implementation | `pkg/controlplane` |
+| Control plane | Interface only — no implementation (Tool Registry moved out to its own package — see below) | `pkg/controlplane` |
 
 ### Tool Gateway — build now
 
@@ -202,13 +203,19 @@ here fails open.
 
 ## Repo layout notes
 
-The layout mostly follows what was proposed, with one addition:
+The layout mostly follows what was proposed, with two additions.
 **`pkg/controlplane`** wasn't in the original sketch, but the component
 status table calls for a Control plane stub, and every other stub component
 (`identity`, `modelgw`, `sandbox`, `scheduler`) got its own `pkg/` directory
 for consistency. Adding a fifth stub package alongside them was more
 consistent than leaving Control plane as the one component with no code at
 all, or wedging it into an unrelated package.
+
+**`pkg/toolregistry`** is a Control Plane service (`docs/02-architecture.md`
+§2 lists the Tool Registry there) that got a real implementation
+(Milestone M2) before `pkg/controlplane` itself got any — rather than
+becoming the one non-stub corner of a package whose whole point is "not
+implemented yet," it grew its own home. See `docs/adr/0008-tool-registry.md`.
 
 `pkg/types` has no dependencies on any other package in this repo, by
 design — everything else depends on it, so it cannot depend back without

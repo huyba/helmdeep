@@ -49,6 +49,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type issueRequest struct {
 	Agent           string   `json:"agent"`
 	DelegationChain []string `json:"delegation_chain"`
+	Scope           []string `json:"scope"`
 }
 
 type issueResponse struct {
@@ -67,7 +68,7 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.issuer.IssueSIT(req.Agent, req.DelegationChain, s.sitTTL)
+	token, err := s.issuer.IssueSIT(req.Agent, req.DelegationChain, req.Scope, s.sitTTL)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return

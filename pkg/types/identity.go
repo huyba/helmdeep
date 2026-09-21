@@ -23,15 +23,22 @@ const (
 //
 // DelegationChain records the principals this call was delegated through,
 // outermost first (e.g. a human who invoked a workflow agent that spawned
-// this one). It is always empty in this repo for now: real delegation
-// requires the identity & credential exchange component, which is
-// interface-only (see pkg/identity and docs/04-identity-authz.md). The field
-// exists now so DecisionRequest and ActionRecord don't need a breaking
-// change when delegation lands.
+// this one). As of Milestone M1, pkg/identity.JWTResolver populates this
+// from a verified Session Identity Token's `delegation_chain` claim — see
+// docs/adr/0007-credential-broker-scope.md for what's verified (the agent
+// hop, cryptographically) versus asserted (the human hop, not checked
+// against a real IdP). It's still empty when the pre-M1 static-token
+// bootstrap resolver is active (gated behind -dev-insecure).
+//
+// Scopes records what the caller's own credential grants it — as of
+// Milestone M2, from the same SIT's `scope` claim. This is deliberately
+// separate from a tool's *required* scopes (pkg/toolregistry.Entry.Scopes):
+// a policy compares the two, this type only carries what the caller has.
 type Subject struct {
 	ID              string      `json:"id"`
 	Kind            SubjectKind `json:"kind"`
 	AgentVersion    string      `json:"agent_version,omitempty"`
 	DelegationChain []string    `json:"delegation_chain,omitempty"`
+	Scopes          []string    `json:"scopes,omitempty"`
 	TrustLevel      int         `json:"trust_level"`
 }

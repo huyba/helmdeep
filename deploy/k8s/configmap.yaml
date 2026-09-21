@@ -42,6 +42,13 @@ data:
     # names an env var (see secret.yaml) — the token itself never appears
     # in this ConfigMap.
     upstreams: []
+
+    # Tool Registry (docs/05-tool-gateway.md §1, Milestone M2): every tool
+    # this deployment declares — a tool absent here is refused outright.
+    # Left empty alongside the empty upstreams list above; populate both
+    # together with your real tool catalog. See docs/adr/0008-tool-registry.md
+    # and examples/quickstart/config.yaml for a filled-in example.
+    tools: []
 ---
 # The Rego policy bundle, as its own ConfigMap so it can be updated (and
 # SIGHUP-reloaded, see cmd/helmdeep-gateway) independently of the rest of

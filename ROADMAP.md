@@ -71,9 +71,19 @@ session lifecycle, multi-agent coordination (`docs/06-orchestration.md`).
 
 ## Phase 6 — Control plane
 
-Fills in `pkg/controlplane`: agent registry, tool registry, model catalog,
-tenant/org service (`docs/02-architecture.md` §2). Almost certainly where
+Fills in `pkg/controlplane`: agent registry, model catalog, tenant/org
+service (`docs/02-architecture.md` §2). Almost certainly where
 multi-tenancy and any UI would eventually live — neither exists today.
+
+**Tool registry partially delivered ahead of this phase (Milestone M2).**
+`pkg/toolregistry` implements the governance half of
+`docs/05-tool-gateway.md` §1's tool model — risk rating, data classes,
+required scopes, and the "undeclared tools are refused" rule enforced in
+`internal/gateway` — as its own package rather than living inside the
+`pkg/controlplane` stub, because it got a real implementation before any
+other control-plane service did. See `docs/adr/0008-tool-registry.md` for
+what's still missing (JSON Schema validation, reversibility taxonomy,
+egress control, registry-sourced limits).
 
 ## What's explicitly not planned here
 

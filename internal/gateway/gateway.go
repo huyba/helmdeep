@@ -22,6 +22,7 @@ import (
 	"github.com/huyba/helmdeep/pkg/identity"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
+	"github.com/huyba/helmdeep/pkg/toolregistry"
 	"github.com/huyba/helmdeep/pkg/types"
 )
 
@@ -63,6 +64,18 @@ type Gateway struct {
 	// that genuinely has no finer-grained credential to hand out.
 	broker identity.CredentialBroker
 
+	// toolReg is the Tool Registry (docs/05-tool-gateway.md §1,
+	// pkg/toolregistry, Milestone M2): the governed catalog of tools this
+	// deployment has actually declared. It must not be nil — an empty
+	// registry (zero entries) is a valid, if useless, configuration that
+	// denies every tool call, matching the fail-closed default; a nil
+	// registry is a wiring bug, not a supported "skip this check" mode, so
+	// it is not defensively checked here any more than identity or pdp are.
+	// A tool mcp.Registry can route to but toolReg has never declared is
+	// refused (docs/adr/0008-tool-registry.md) — "the platform refuses
+	// undeclared tools," not "an operator may choose not to configure this."
+	toolReg *toolregistry.Registry
+
 	usage *usageTracker
 	prov  *provenanceCache
 	now   func() time.Time
@@ -73,8 +86,9 @@ type Gateway struct {
 // matters. upstreamProvenance maps upstream name to the provenance label
 // applied to values it returns — see the field's doc comment.
 // decisionTimeout bounds each policy decision; pass 0 for no bound. broker
-// may be nil — see the field's doc comment.
-func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registry mcp.Registry, upstreamProvenance map[string]types.Provenance, decisionTimeout time.Duration, broker identity.CredentialBroker) *Gateway {
+// may be nil — see the field's doc comment. toolReg must not be nil — see
+// the field's doc comment.
+func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registry mcp.Registry, upstreamProvenance map[string]types.Provenance, decisionTimeout time.Duration, broker identity.CredentialBroker, toolReg *toolregistry.Registry) *Gateway {
 	return &Gateway{
 		identity:           id,
 		pdp:                pdp,
@@ -83,6 +97,7 @@ func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registr
 		upstreamProvenance: upstreamProvenance,
 		decisionTimeout:    decisionTimeout,
 		broker:             broker,
+		toolReg:            toolReg,
 		usage:              newUsageTracker(),
 		prov:               newProvenanceCache(),
 		now:                time.Now,
@@ -118,9 +133,18 @@ func (g *Gateway) ListTools(ctx context.Context, cc mcp.CallContext, cursor stri
 	now := g.now()
 	var visible []types.Tool
 	for _, tool := range g.registry.Tools() {
+		entry, ok := g.toolReg.Lookup(tool.Name)
+		if !ok {
+			// Undeclared tools are refused outright — never even visible,
+			// same as an out-of-scope tool. See docs/05-tool-gateway.md §1.
+			continue
+		}
 		req := types.DecisionRequest{
 			Subject: subject,
-			Action:  types.Action{Type: "tool_call", Tool: tool.Name},
+			Action: types.Action{
+				Type: "tool_call", Tool: tool.Name,
+				Risk: string(entry.Risk), DataClasses: entry.DataClasses, RequiredScopes: entry.Scopes,
+			},
 			Context: types.DecisionContext{
 				RequestID: cc.RequestID,
 				Time:      now,
@@ -160,10 +184,18 @@ func (g *Gateway) CallTool(ctx context.Context, cc mcp.CallContext, name string,
 		return types.ToolResult{}, &mcp.ProtocolError{Code: -32602, Message: "unknown tool: " + name}
 	}
 
+	entry, ok := g.toolReg.Lookup(name)
+	if !ok {
+		return g.denyUndeclaredTool(ctx, subject, name, now)
+	}
+
 	action := types.Action{
-		Type:      "tool_call",
-		Tool:      name,
-		Arguments: g.taintArguments(subject.ID, arguments, now),
+		Type:           "tool_call",
+		Tool:           name,
+		Arguments:      g.taintArguments(subject.ID, arguments, now),
+		Risk:           string(entry.Risk),
+		DataClasses:    entry.DataClasses,
+		RequiredScopes: entry.Scopes,
 	}
 	req := types.DecisionRequest{
 		Subject: subject,
@@ -293,6 +325,28 @@ func (g *Gateway) denyWithoutSubject(ctx context.Context, name string, arguments
 		slog.Error("failed to record unresolved-identity denial", "tool", name, "error", err)
 	}
 	return deniedResult("credential not recognized"), nil
+}
+
+// denyUndeclaredTool handles a tool that mcp.Registry can route to (a live
+// upstream really exposes it) but that the Tool Registry has never
+// declared. docs/05-tool-gateway.md §1's rule is absolute: "no tool
+// executes without a registered schema... the platform refuses them." This
+// is a policy-shaped denial like any other — the tool exists and the
+// caller is known, it's simply ungoverned — not the mcp.ProtocolError used
+// for a tool that doesn't exist at all; see the unknown-tool branch above.
+func (g *Gateway) denyUndeclaredTool(ctx context.Context, subject types.Subject, name string, now time.Time) (types.ToolResult, error) {
+	decision := types.DecisionResponse{Outcome: types.OutcomeDeny, PolicyID: "toolregistry.undeclared", Reason: "tool is not registered"}
+	action := types.Action{Type: "tool_call", Tool: name}
+	if err := g.auditLog.Append(ctx, types.ActionRecord{
+		Timestamp: now,
+		Subject:   subject,
+		Action:    action,
+		Decision:  decision,
+		Outcome:   types.RecordOutcomeDenied,
+	}); err != nil {
+		slog.Error("failed to record undeclared-tool denial", "tool", name, "error", err)
+	}
+	return deniedResult(decision.Reason), nil
 }
 
 func deniedResult(reason string) types.ToolResult {

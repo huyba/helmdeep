@@ -16,9 +16,10 @@ import (
 func TestCheckDevInsecureGate(t *testing.T) {
 	staticConfigured := config{}
 	staticConfigured.Identity.StaticTokens = map[string]struct {
-		ID         string `json:"id"`
-		Kind       string `json:"kind"`
-		TrustLevel int    `json:"trust_level"`
+		ID         string   `json:"id"`
+		Kind       string   `json:"kind"`
+		TrustLevel int      `json:"trust_level"`
+		Scopes     []string `json:"scopes"`
 	}{"tok": {ID: "agent:test"}}
 
 	tests := []struct {
@@ -42,23 +43,29 @@ func TestCheckDevInsecureGate(t *testing.T) {
 	}
 }
 
-func TestLoadConfig_IdentitySourceValidation(t *testing.T) {
-	writeTestConfig := func(t *testing.T, body string) string {
-		t.Helper()
-		dir := t.TempDir()
-		path := dir + "/config.yaml"
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
-		return path
+// writeTestConfig writes body to a temp config.yaml and returns its path,
+// for tests that exercise loadConfig against a hand-written config.
+func writeTestConfig(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := dir + "/config.yaml"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
+	return path
+}
 
-	base := `
+// baseTestConfig is the minimal policy/audit config every loadConfig test
+// below builds on top of — neither section is what's under test.
+const baseTestConfig = `
 policy:
   path: /tmp/policies
 audit:
   path: /tmp/audit.log
 `
+
+func TestLoadConfig_IdentitySourceValidation(t *testing.T) {
+	base := baseTestConfig
 
 	tests := []struct {
 		name       string
@@ -104,6 +111,77 @@ audit:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := writeTestConfig(t, base+tt.identity)
+			_, err := loadConfig(path)
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("loadConfig: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("loadConfig: expected an error containing %q, got nil", tt.wantErrSub)
+			}
+		})
+	}
+}
+
+// TestLoadConfig_ToolsValidation covers Milestone M2's tools: config
+// section, built the same way toolregistry.New itself validates entries
+// (cmd/helmdeep-gateway/config.go's toolRegistry) — a misconfigured
+// registry entry should fail loudly at config load, not at the first
+// tools/call that happens to hit it.
+func TestLoadConfig_ToolsValidation(t *testing.T) {
+	identity := `identity:
+  static_tokens:
+    tok:
+      id: agent:test
+`
+
+	tests := []struct {
+		name       string
+		tools      string
+		wantErrSub string // empty means no error expected
+	}{
+		{
+			name:       "no tools section is valid — an empty Tool Registry, deny-everything by default",
+			tools:      "",
+			wantErrSub: "",
+		},
+		{
+			name: "a declared tool with a valid risk rating is valid",
+			tools: `tools:
+  - id: kb.search
+    upstream: knowledgebase
+    risk: low
+`,
+			wantErrSub: "",
+		},
+		{
+			name: "an invalid risk rating is rejected at config load, not silently accepted",
+			tools: `tools:
+  - id: kb.search
+    upstream: knowledgebase
+    risk: apocalyptic
+`,
+			wantErrSub: "invalid risk rating",
+		},
+		{
+			name: "a duplicate tool id is rejected at config load",
+			tools: `tools:
+  - id: kb.search
+    upstream: knowledgebase
+    risk: low
+  - id: kb.search
+    upstream: knowledgebase
+    risk: high
+`,
+			wantErrSub: "registered more than once",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTestConfig(t, baseTestConfig+identity+tt.tools)
 			_, err := loadConfig(path)
 			if tt.wantErrSub == "" {
 				if err != nil {
