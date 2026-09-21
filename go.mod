@@ -1,6 +1,6 @@
 module github.com/huyba/helmdeep
 
-go 1.26.0
+go 1.26.6
 
 require (
 	github.com/lestrrat-go/jwx/v3 v3.2.0
