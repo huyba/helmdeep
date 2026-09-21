@@ -55,9 +55,14 @@ GitHub repo-admin and Azure subscription access):
 2. **Azure OIDC federated login — no client secret stored anywhere.** An
    app registration already exists for this
    (`helmdeep-github-actions-deploy`) with a federated credential whose
-   subject is `repo:huyba/helmdeep:ref:refs/heads/main` (i.e. it only
-   trusts tokens from this exact repo's `main` branch pushes — see
-   `azure/login`'s OIDC docs for the federated-credential mechanics). Add
+   subject is `repo:huyba@6476814/helmdeep@1359057496:ref:refs/heads/main`
+   (i.e. it only trusts tokens from this exact repo's `main` branch pushes).
+   Note the `owner@id/repo@id` form: GitHub now presents immutable-ID
+   subjects, not the classic `repo:owner/repo:...` form — a credential
+   registered with the classic form fails with AADSTS700213 "No matching
+   federated identity record found". If a login ever fails that way, the
+   error's annotation (readable on the run's public check-run API) shows
+   the exact subject GitHub presented; register that. Add
    these three as **GitHub Actions repository secrets** (Settings →
    Secrets and variables → Actions): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
    `AZURE_SUBSCRIPTION_ID`. None of them are secret in the sense of
