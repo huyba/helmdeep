@@ -260,3 +260,30 @@ func TestOPADecider_LoadsFromKubernetesConfigMapMount(t *testing.T) {
 		t.Fatalf("got %+v, want allow (loaded exactly once)", resp)
 	}
 }
+
+func TestOPADecider_ReadyReflectsLoadState(t *testing.T) {
+	d := NewOPADecider()
+	if err := d.Ready(); err == nil {
+		t.Fatal("Ready() passed before any policy was loaded")
+	}
+
+	dir := t.TempDir()
+	writePolicy(t, dir, testPolicyAllowKBSearch)
+	if err := d.Load(dir); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := d.Ready(); err != nil {
+		t.Fatalf("Ready() after a successful Load: %v", err)
+	}
+
+	// A failed Reload keeps the previous policy active, so it must not flip
+	// readiness — taking the pod out of rotation for a typo in a policy edit
+	// would turn a safe failure into an outage.
+	writePolicy(t, dir, testPolicyBroken)
+	if err := d.Reload(); err == nil {
+		t.Fatal("expected Reload of a broken policy to error")
+	}
+	if err := d.Ready(); err != nil {
+		t.Fatalf("Ready() after a failed Reload: %v", err)
+	}
+}

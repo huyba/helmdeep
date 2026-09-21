@@ -195,3 +195,17 @@ func TestLoadConfig_ToolsValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig_RejectsMCPPathThatCollidesWithHealthEndpoints(t *testing.T) {
+	identity := `identity:
+  static_tokens:
+    tok:
+      id: agent:test
+`
+	for _, reserved := range []string{"/healthz", "/livez"} {
+		cfgText := "path: " + reserved + "\n" + baseTestConfig + identity
+		if _, err := loadConfig(writeTestConfig(t, cfgText)); err == nil {
+			t.Fatalf("loadConfig accepted path %q, which would collide with a health endpoint and panic at startup", reserved)
+		}
+	}
+}

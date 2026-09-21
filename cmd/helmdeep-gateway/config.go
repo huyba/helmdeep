@@ -107,6 +107,9 @@ func loadConfig(path string) (config, error) {
 		return config{}, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
+	if cfg.Path == "/healthz" || cfg.Path == "/livez" {
+		return config{}, fmt.Errorf("config %s: path %q is reserved for the health endpoints", path, cfg.Path)
+	}
 	if cfg.Policy.Path == "" {
 		return config{}, fmt.Errorf("config %s: policy.path is required", path)
 	}

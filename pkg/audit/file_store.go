@@ -136,6 +136,31 @@ func (s *FileStore) Append(ctx context.Context, rec types.ActionRecord) error {
 	return nil
 }
 
+// Check reports whether the log file can currently be opened for append and
+// fsynced — the same two operations Append depends on — without writing a
+// byte, since anything written here would be a record in the hash chain. It
+// catches a read-only or vanished filesystem, a detached volume, and an I/O
+// error on sync; it does not detect a merely full disk, which only a real
+// write would reveal. It shares Append's lock so a probe can't interleave
+// with a record being written.
+func (s *FileStore) Check(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- path is operator-supplied gateway config, not attacker-controlled input
+	if err != nil {
+		return fmt.Errorf("open audit log for append: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("fsync audit log: %w", err)
+	}
+	return nil
+}
+
 // Verify walks the log from the beginning and reports the first break in
 // the hash chain, or nil if the whole chain is intact.
 func (s *FileStore) Verify(ctx context.Context) error {

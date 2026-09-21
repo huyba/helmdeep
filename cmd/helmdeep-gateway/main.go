@@ -20,6 +20,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 
 	"github.com/huyba/helmdeep/internal/gateway"
+	"github.com/huyba/helmdeep/internal/health"
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/identity"
 	"github.com/huyba/helmdeep/pkg/mcp"
@@ -138,6 +139,14 @@ func runServe(args []string) error {
 	}
 	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance(), decisionTimeout, broker, toolReg)
 	server := mcp.NewServer(cfg.Listen, cfg.Path, gw, version)
+
+	// /livez: process is up. /healthz: policy is loaded and the audit log
+	// is writable — see internal/health for why these are two endpoints.
+	server.Mount("/livez", health.Livez())
+	server.Mount("/healthz", health.Healthz(
+		health.Check{Name: "policy", Fn: func(context.Context) error { return pdp.Ready() }},
+		health.Check{Name: "audit", Fn: auditStore.Check},
+	))
 
 	// SIGHUP reloads the policy bundle without restarting the gateway or
 	// interrupting in-flight sessions — see pkg/policy.Loader and

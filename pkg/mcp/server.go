@@ -32,22 +32,30 @@ type Server struct {
 
 	handler Handler
 	version string
+	mux     *http.ServeMux
 	http    *http.Server
 }
 
 // NewServer builds a Server that listens on addr and serves the single MCP
 // endpoint at path (e.g. "/mcp"). version is reported in serverInfo.
 func NewServer(addr, path string, h Handler, version string) *Server {
-	s := &Server{handler: h, version: version}
-	mux := http.NewServeMux()
-	mux.HandleFunc(path, s.serveHTTP)
+	s := &Server{handler: h, version: version, mux: http.NewServeMux()}
+	s.mux.HandleFunc(path, s.serveHTTP)
 	s.http = &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           s.mux,
 		ReadHeaderTimeout: 10 * time.Second, // mitigate Slowloris-style slow-header attacks
 	}
 	return s
 }
+
+// Mount serves h at pattern on the same listener as the MCP endpoint, for
+// non-protocol routes such as health probes. Those routes bypass all MCP
+// header, `_meta`, and Origin validation by design — they are not part of
+// the protocol — so mount only handlers that are safe unauthenticated. It
+// must be called before Serve; http.ServeMux registration is not safe
+// concurrently with serving.
+func (s *Server) Mount(pattern string, h http.Handler) { s.mux.Handle(pattern, h) }
 
 // Handler returns the underlying http.Handler, so tests can drive it with
 // httptest.NewServer instead of binding a real socket via Serve.

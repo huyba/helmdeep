@@ -260,3 +260,73 @@ func mustUnmarshal(t *testing.T, data []byte, v any) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 }
+
+// Check must succeed on a healthy store and — the property a readiness probe
+// actually needs — must not write anything: a byte written here would be a
+// forged-looking record breaking the hash chain.
+func TestFileStore_CheckPassesAndWritesNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.log")
+	s, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := s.Append(context.Background(), testRecord("kb.search", types.RecordOutcomeAllowed)); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	before, err := os.ReadFile(path) // #nosec G304 -- test-controlled temp path
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := s.Check(context.Background()); err != nil {
+			t.Fatalf("Check %d on a healthy store: %v", i, err)
+		}
+	}
+
+	after, err := os.ReadFile(path) // #nosec G304 -- test-controlled temp path
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("Check changed the log file's contents")
+	}
+	if err := s.Verify(context.Background()); err != nil {
+		t.Fatalf("chain no longer verifies after Check: %v", err)
+	}
+}
+
+// A store whose directory becomes unwritable (read-only mount, detached
+// volume) must report unhealthy. Skipped as root, which ignores permission
+// bits and would open the file anyway.
+func TestFileStore_CheckFailsWhenDirectoryUnwritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits are not enforced")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	s, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := os.Chmod(path, 0o400); err != nil { // read-only file: opening for append must now fail
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	if err := s.Check(context.Background()); err == nil {
+		t.Fatal("Check passed on a log file that cannot be opened for append")
+	}
+}
+
+func TestFileStore_CheckHonoursCancelledContext(t *testing.T) {
+	s, err := NewFileStore(filepath.Join(t.TempDir(), "audit.log"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Check(ctx); err == nil {
+		t.Fatal("Check ignored an already-cancelled context")
+	}
+}

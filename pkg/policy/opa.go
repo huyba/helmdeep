@@ -93,6 +93,20 @@ func (d *OPADecider) Load(path string) error {
 	return nil
 }
 
+// Ready reports whether a policy bundle is loaded and evaluable. Before the
+// first successful Load every Decide is a deny (fail closed), so an
+// unloaded decider is running but useless — exactly what a readiness probe
+// should refuse to route traffic to. A failed Reload keeps the previous
+// policy active, so it does not make Ready fail.
+func (d *OPADecider) Ready() error {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if d.prepared == nil {
+		return fmt.Errorf("no policy bundle loaded")
+	}
+	return nil
+}
+
 // Reload recompiles the policy bundle from the path passed to the last
 // successful Load, and swaps it in atomically. A compile error leaves the
 // previously active policy in place and is returned to the caller — a
