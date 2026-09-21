@@ -50,6 +50,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Fail fast, per secret, with a clear message — an empty or
+      # mistyped secret otherwise surfaces as an opaque azure/login OIDC
+      # error, and a separate step per secret means the failing step's
+      # *name* alone (visible even without access to log text) says which
+      # one is wrong. Checks presence and GUID shape, never prints values.
+      - name: Check AZURE_CLIENT_ID secret is set and GUID-shaped
+        env:
+          VALUE: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          [[ "$VALUE" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+            || { echo "::error::AZURE_CLIENT_ID is missing, empty, or not a bare GUID (check for stray whitespace/quotes)"; exit 1; }
+      - name: Check AZURE_TENANT_ID secret is set and GUID-shaped
+        env:
+          VALUE: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          [[ "$VALUE" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+            || { echo "::error::AZURE_TENANT_ID is missing, empty, or not a bare GUID (check for stray whitespace/quotes)"; exit 1; }
+      - name: Check AZURE_SUBSCRIPTION_ID secret is set and GUID-shaped
+        env:
+          VALUE: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          [[ "$VALUE" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+            || { echo "::error::AZURE_SUBSCRIPTION_ID is missing, empty, or not a bare GUID (check for stray whitespace/quotes)"; exit 1; }
       - uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
