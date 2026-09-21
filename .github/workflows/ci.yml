@@ -46,7 +46,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           # Pinned, not `latest`: `latest` means "whatever golangci-lint
           # ships between now and whenever this job next runs," which can
