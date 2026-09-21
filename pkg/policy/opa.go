@@ -9,10 +9,25 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/open-policy-agent/opa/v1/loader"
 	"github.com/open-policy-agent/opa/v1/rego"
 
 	"github.com/huyba/helmdeep/pkg/types"
 )
+
+// hiddenFileFilter excludes any file or directory below the bundle root
+// whose name starts with "." — in particular Kubernetes ConfigMap volumes,
+// which mount as a visible top-level symlink per key pointing through a
+// hidden "..data" symlink to a hidden, timestamped "..<timestamp>"
+// directory holding the real files (this is how kubelet swaps in updated
+// ConfigMap content atomically). Without this filter, rego.Load's
+// recursive walk finds the same *.rego file three times — once via each
+// path — and OPA's compiler then reports "multiple default rules" for a
+// bundle that, from a plain filesystem's point of view, has exactly one.
+// minDepth 1 so this only excludes things *below* the bundle root, not the
+// root path itself, which may legitimately start with "." (e.g. a
+// dotfile-prefixed temp dir in a test).
+var hiddenFileFilter = loader.GlobExcludeName(".*", 1)
 
 // regoQuery is the rule every policy bundle must define. See
 // docs/policy-guide.md for the input contract and docs/adr/0002 for why
@@ -65,7 +80,7 @@ func NewOPADecider() *OPADecider {
 func (d *OPADecider) Load(path string) error {
 	pq, err := rego.New(
 		rego.Query(regoQuery),
-		rego.Load([]string{path}, nil),
+		rego.Load([]string{path}, hiddenFileFilter),
 	).PrepareForEval(context.Background())
 	if err != nil {
 		return fmt.Errorf("compile policy bundle at %q: %w", path, err)

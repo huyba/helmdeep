@@ -216,3 +216,47 @@ decision := "just a string, not an object"
 		t.Fatalf("got %+v, want deny/result_parse_error", resp)
 	}
 }
+
+// TestOPADecider_LoadsFromKubernetesConfigMapMount reproduces the exact
+// directory layout kubelet creates for a mounted ConfigMap volume: the
+// real file lives in a hidden, timestamped directory
+// (e.g. "..2026_01_01_00_00_00.000000000"), a hidden "..data" symlink
+// points at that directory, and the visible, user-facing filename is
+// itself a symlink through "..data" — kubelet's mechanism for swapping in
+// updated ConfigMap content atomically. A naive recursive directory walk
+// (rego.Load's default with a nil filter) finds the same *.rego file three
+// times, once per path, and OPA's compiler then reports "multiple default
+// rules" for a bundle that has exactly one from any real user's point of
+// view — this is exactly what broke Load on a real AKS deployment. See
+// hiddenFileFilter's doc comment.
+func TestOPADecider_LoadsFromKubernetesConfigMapMount(t *testing.T) {
+	dir := t.TempDir()
+
+	realDir := filepath.Join(dir, "..2026_01_01_00_00_00.000000000")
+	if err := os.Mkdir(realDir, 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", realDir, err)
+	}
+	writePolicy(t, realDir, testPolicyAllowKBSearch)
+
+	dataLink := filepath.Join(dir, "..data")
+	if err := os.Symlink(realDir, dataLink); err != nil {
+		t.Fatalf("symlink ..data: %v", err)
+	}
+	visibleFile := filepath.Join(dir, "policy.rego")
+	if err := os.Symlink(filepath.Join(dataLink, "policy.rego"), visibleFile); err != nil {
+		t.Fatalf("symlink policy.rego: %v", err)
+	}
+
+	d := NewOPADecider()
+	if err := d.Load(dir); err != nil {
+		t.Fatalf("Load a ConfigMap-shaped directory: %v", err)
+	}
+
+	resp, err := d.Decide(context.Background(), decisionRequest("kb.search"))
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if resp.Outcome != types.OutcomeAllow {
+		t.Fatalf("got %+v, want allow (loaded exactly once)", resp)
+	}
+}
