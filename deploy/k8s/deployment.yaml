@@ -14,6 +14,13 @@ spec:
   # accept the current per-pod semantics explicitly) before scaling out —
   # this is a real limitation, not a placeholder comment.
   replicas: 1
+  # Recreate, not the default RollingUpdate: the audit log is a single-writer
+  # hash chain on a ReadWriteOnce disk (pvc.yaml), so the old pod must be
+  # gone before the new one starts. RollingUpdate would run both at once and
+  # deadlock on the disk attach (or, on one node, interleave two writers into
+  # one file). Cost: a few seconds of downtime per deploy.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: helmdeep-tool-gateway
@@ -67,29 +74,35 @@ spec:
               readOnly: true
             # readOnlyRootFilesystem above means the container's own
             # filesystem can't take the audit log — it needs a real
-            # writable mount. emptyDir here means the ledger does NOT
-            # survive a pod restart or reschedule; replace with a
-            # PersistentVolumeClaim before this holds anything you need to
-            # keep, and see docs/adr/0004-action-record-format.md for why
-            # losing the chain's tail on restart is a real gap, not a
-            # cosmetic one.
+            # writable mount. This is a PersistentVolumeClaim (pvc.yaml), so
+            # the ledger survives pod restarts and reschedules; fsGroup in
+            # the pod securityContext makes the volume writable by the
+            # non-root user. See pvc.yaml for the retention caveat.
             - name: data
               mountPath: /data
-          # No dedicated health endpoint exists yet (pkg/mcp.Server only
-          # serves the MCP path) — TCP probes are the honest default until
-          # one does. A real readiness check (confirm the policy bundle
-          # loaded, the audit log is writable) would be a meaningfully
-          # better signal than "the port accepts connections."
+          # Two endpoints (internal/health), two probes, on purpose:
+          #  - readiness -> /healthz: policy bundle loaded AND audit log
+          #    writable. Failing it takes the pod out of Service rotation
+          #    without restarting it — the right response to a storage or
+          #    policy problem, which a restart can't fix.
+          #  - liveness -> /livez: the process answers HTTP, nothing more.
+          #    Pointing liveness at the dependency checks would make kubelet
+          #    kill and restart the pod over a disk problem, a crash loop
+          #    instead of a clear "not ready".
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: mcp
             initialDelaySeconds: 2
             periodSeconds: 5
+            timeoutSeconds: 3
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /livez
               port: mcp
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
             failureThreshold: 3
           resources:
             requests:
@@ -128,4 +141,5 @@ spec:
           configMap:
             name: helmdeep-tool-gateway-policy
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: helmdeep-tool-gateway-audit

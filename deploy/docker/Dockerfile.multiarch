@@ -1,0 +1,37 @@
+# Multi-architecture (linux/amd64 + linux/arm64) build of cmd/helmdeep-gateway,
+# used by .github/workflows/deploy.yml. Same image as ./Dockerfile; the only
+# difference is HOW it is built.
+#
+# The build stage always runs on the builder's own architecture
+# ($BUILDPLATFORM) and cross-compiles to the target with GOOS/GOARCH. Go
+# cross-compiles natively, so the arm64 image costs one extra `go build`,
+# instead of running the whole toolchain under QEMU emulation (roughly 10x
+# slower for a dependency tree the size of OPA's).
+#
+# This needs BuildKit (`docker buildx build --platform ...`). It is a
+# separate file from ./Dockerfile on purpose: the classic builder rejects
+# `FROM --platform=$BUILDPLATFORM`, and ./Dockerfile must keep working with
+# a plain `docker build` / `docker compose` on a machine with no buildx, as
+# the quickstart does. Keep the two in sync when either changes.
+
+ARG BUILD_PKG=./cmd/helmdeep-gateway
+
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG BUILD_PKG
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o /out/app "${BUILD_PKG}"
+# distroless has no shell to mkdir/chown in the final stage; see ./Dockerfile.
+RUN mkdir -p /out/data
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/app /usr/local/bin/app
+COPY --from=build --chown=nonroot:nonroot /out/data /data
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/app"]
+CMD ["serve"]

@@ -1,0 +1,29 @@
+# Durable storage for the hash-chained audit log (/data/audit.log).
+# Replaces the emptyDir the Deployment used to mount, which lost the whole
+# ledger on any pod restart or reschedule — see
+# docs/adr/0004-action-record-format.md for why losing the chain matters.
+#
+# storageClassName is deliberately unset so the cluster's default class
+# provisions it: on AKS that is an Azure managed disk (disk.csi.azure.com),
+# on kind/minikube a local volume — same manifest everywhere.
+#
+# ReadWriteOnce + one Deployment replica is not just a default here, it is
+# a correctness requirement: FileStore is a single-writer hash chain, and
+# two pods appending to one file would interleave records and break it.
+# That is also why the Deployment uses strategy Recreate.
+#
+# RETENTION: AKS's default StorageClass has reclaimPolicy Delete, so
+# deleting this PVC (or its namespace) deletes the disk and the audit log
+# with it. For evidence you must keep, use a StorageClass with
+# reclaimPolicy: Retain, or snapshot the disk, before relying on this.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: helmdeep-tool-gateway-audit
+  labels:
+    app.kubernetes.io/name: helmdeep-tool-gateway
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 8Gi

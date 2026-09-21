@@ -39,7 +39,11 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: deploy/docker/Dockerfile
+          # Dockerfile.multiarch cross-compiles natively (no QEMU); the
+          # arm64 variant is what the B2pls_v2 (ARM) node pool runs, amd64
+          # keeps the image usable anywhere else. See that file's header.
+          file: deploy/docker/Dockerfile.multiarch
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
@@ -97,10 +101,16 @@ jobs:
       - name: Apply manifests
         run: |
           kubectl apply -f deploy/k8s/configmap.yaml
+          kubectl apply -f deploy/k8s/pvc.yaml
           kubectl apply -f deploy/k8s/service.yaml
-          kubectl apply -f deploy/k8s/deployment.yaml
+      # Apply the Deployment with THIS commit's image already substituted in
+      # (--local edits the manifest without touching the cluster), so the
+      # pod is replaced exactly once. Applying the manifest's own `:latest`
+      # and then running `kubectl set image` would replace it twice, and
+      # with strategy Recreate each replacement is real downtime.
       - name: Roll out this commit's image
         run: |
-          kubectl set image "deployment/$DEPLOYMENT_NAME" \
-            "$DEPLOYMENT_NAME=${IMAGE}:${GITHUB_SHA}"
-          kubectl rollout status "deployment/$DEPLOYMENT_NAME" --timeout=180s
+          kubectl set image --local -f deploy/k8s/deployment.yaml \
+            "$DEPLOYMENT_NAME=${IMAGE}:${GITHUB_SHA}" -o yaml \
+            | kubectl apply -f -
+          kubectl rollout status "deployment/$DEPLOYMENT_NAME" --timeout=240s
