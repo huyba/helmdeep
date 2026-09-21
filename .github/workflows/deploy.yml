@@ -1,0 +1,83 @@
+name: Deploy
+
+# Continuous deployment to the dev AKS cluster: every push to main builds a
+# fresh image tagged with the commit SHA, pushes it to GHCR, then applies
+# deploy/k8s/'s manifests and rolls the Deployment to that exact image.
+# This is deliberately separate from release.yml (which builds
+# version-tagged, multi-arch release artifacts on `v*` tags) — pushing to
+# main and cutting a release are different events with different audiences.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+  # Required for azure/login's OIDC federated-credential exchange — no
+  # long-lived Azure client secret is stored in this repo at all. See
+  # deploy/k8s/README.md for how the federated credential and role
+  # assignment were set up.
+  id-token: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+  AKS_RESOURCE_GROUP: helmdeep-rg
+  AKS_CLUSTER_NAME: helmdeep-aks
+  DEPLOYMENT_NAME: helmdeep-tool-gateway
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/setup-kubectl@v4
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --admin \
+            --resource-group "$AKS_RESOURCE_GROUP" \
+            --name "$AKS_CLUSTER_NAME" \
+            --overwrite-existing
+      # secret.yaml is deliberately NOT applied here — it ships placeholder
+      # values (see its own header comment) and this pipeline has no real
+      # credentials to put in it. Populate real secrets once, out of band,
+      # with `kubectl create secret generic helmdeep-tool-gateway-secrets
+      # --from-literal=...` — every env var referencing it in
+      # deployment.yaml is `optional: true`, so a cluster with no such
+      # Secret at all still deploys cleanly, just without those upstream
+      # credentials configured.
+      - name: Apply manifests
+        run: |
+          kubectl apply -f deploy/k8s/configmap.yaml
+          kubectl apply -f deploy/k8s/service.yaml
+          kubectl apply -f deploy/k8s/deployment.yaml
+      - name: Roll out this commit's image
+        run: |
+          kubectl set image "deployment/$DEPLOYMENT_NAME" \
+            "$DEPLOYMENT_NAME=${IMAGE}:${GITHUB_SHA}"
+          kubectl rollout status "deployment/$DEPLOYMENT_NAME" --timeout=180s

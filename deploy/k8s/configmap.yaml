@@ -7,9 +7,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: helmdeep-gateway-config
+  name: helmdeep-tool-gateway-config
   labels:
-    app.kubernetes.io/name: helmdeep-gateway
+    app.kubernetes.io/name: helmdeep-tool-gateway
 data:
   config.yaml: |
     listen: ":8443"
@@ -57,9 +57,9 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: helmdeep-gateway-policy
+  name: helmdeep-tool-gateway-policy
   labels:
-    app.kubernetes.io/name: helmdeep-gateway
+    app.kubernetes.io/name: helmdeep-tool-gateway
 data:
   decision.rego: |
     package helmdeep.authz

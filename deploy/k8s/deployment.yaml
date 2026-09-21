@@ -1,9 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: helmdeep-gateway
+  name: helmdeep-tool-gateway
   labels:
-    app.kubernetes.io/name: helmdeep-gateway
+    app.kubernetes.io/name: helmdeep-tool-gateway
 spec:
   # Not >1 yet: internal/gateway's usageTracker (aggregate rate limits) and
   # the provenance cache (internal/gateway/provenance.go) are in-process,
@@ -16,11 +16,11 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: helmdeep-gateway
+      app.kubernetes.io/name: helmdeep-tool-gateway
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: helmdeep-gateway
+        app.kubernetes.io/name: helmdeep-tool-gateway
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -31,8 +31,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: helmdeep-gateway
-          image: helmdeep-gateway:latest # replace with your registry/tag; do not run `latest` in a real environment
+        - name: helmdeep-tool-gateway
+          image: ghcr.io/huyba/helmdeep:latest # built by .github/workflows/deploy.yml; do not run `latest` in a real environment
           imagePullPolicy: IfNotPresent
           # -dev-insecure: configmap.yaml's config.yaml uses
           # identity.static_tokens (see its own DEVELOPMENT ONLY note) —
@@ -54,7 +54,7 @@ spec:
             - name: EXAMPLE_UPSTREAM_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: helmdeep-gateway-secrets
+                  name: helmdeep-tool-gateway-secrets
                   key: EXAMPLE_UPSTREAM_TOKEN
                   optional: true
           volumeMounts:
@@ -123,9 +123,9 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: helmdeep-gateway-config
+            name: helmdeep-tool-gateway-config
         - name: policy
           configMap:
-            name: helmdeep-gateway-policy
+            name: helmdeep-tool-gateway-policy
         - name: data
           emptyDir: {}

@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: helmdeep-gateway
+  name: helmdeep-tool-gateway
   labels:
-    app.kubernetes.io/name: helmdeep-gateway
+    app.kubernetes.io/name: helmdeep-tool-gateway
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: helmdeep-gateway
+    app.kubernetes.io/name: helmdeep-tool-gateway
   ports:
     - name: mcp
       port: 8443
