@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/huyba/helmdeep/pkg/modelcatalog"
 	"github.com/huyba/helmdeep/pkg/modelgw"
 	"github.com/huyba/helmdeep/pkg/policy"
 	"github.com/huyba/helmdeep/pkg/types"
@@ -62,10 +63,14 @@ decision := {"outcome": "allow", "policy_id": "test.allow"}
 		t.Fatalf("Load policy: %v", err)
 	}
 	provider := &stubModelProvider{name: "stub", resp: modelgw.Response{Model: "stub-v1", Content: "ok"}}
+	catalog, err := modelcatalog.New([]modelcatalog.Entry{{Provider: "stub", Model: "stub-v1", Approved: true}})
+	if err != nil {
+		t.Fatalf("modelcatalog.New: %v", err)
+	}
 	gw, err := modelgw.New(
 		map[string]modelgw.Provider{"stub": provider},
 		map[string]modelgw.Route{"reasoning": {Provider: "stub", Model: "stub-v1"}},
-		pdp, auditStore,
+		pdp, auditStore, catalog,
 	)
 	if err != nil {
 		t.Fatalf("modelgw.New: %v", err)

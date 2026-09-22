@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/huyba/helmdeep/pkg/audit"
+	"github.com/huyba/helmdeep/pkg/modelcatalog"
 	"github.com/huyba/helmdeep/pkg/policy"
 	"github.com/huyba/helmdeep/pkg/types"
 )
@@ -107,15 +108,24 @@ type Gateway struct {
 	routes    map[string]Route
 	pdp       policy.Decider
 	auditLog  audit.Store
-	now       func() time.Time
+	// catalog is the Model Catalog (pkg/modelcatalog): the governed list
+	// of provider+model pairs actually approved for use. It must not be
+	// nil — an empty catalog is a valid, if useless, configuration that
+	// refuses every call, matching the fail-closed default every other
+	// registry in this repo uses; a nil catalog is a wiring bug, not a
+	// supported "skip this check" mode. See
+	// docs/adr/0013-model-catalog.md.
+	catalog *modelcatalog.Registry
+	now     func() time.Time
 }
 
 // New validates routes (every Model/FallbackModel is a real, non-"latest"
 // string; every referenced provider name exists in providers) and returns
 // a Gateway, or an error describing the first problem — a misconfigured
 // route should fail loudly at startup, matching
-// pkg/toolregistry.New's same convention.
-func New(providers map[string]Provider, routes map[string]Route, pdp policy.Decider, auditLog audit.Store) (*Gateway, error) {
+// pkg/toolregistry.New's same convention. catalog must not be nil — see
+// the field's doc comment.
+func New(providers map[string]Provider, routes map[string]Route, pdp policy.Decider, auditLog audit.Store, catalog *modelcatalog.Registry) (*Gateway, error) {
 	for purpose, r := range routes {
 		if r.Provider == "" {
 			return nil, fmt.Errorf("route %q: provider is required", purpose)
@@ -135,7 +145,7 @@ func New(providers map[string]Provider, routes map[string]Route, pdp policy.Deci
 			}
 		}
 	}
-	return &Gateway{providers: providers, routes: routes, pdp: pdp, auditLog: auditLog, now: time.Now}, nil
+	return &Gateway{providers: providers, routes: routes, pdp: pdp, auditLog: auditLog, catalog: catalog, now: time.Now}, nil
 }
 
 func validateModelVersion(purpose, field, model string) error {
@@ -174,6 +184,9 @@ func (g *Gateway) Complete(ctx context.Context, subject types.Subject, req Reque
 	route, ok := g.routes[req.Purpose]
 	if !ok {
 		return Response{}, g.denyf(ctx, subject, req, now, "modelgw.no_route", "no route configured for purpose %q", req.Purpose)
+	}
+	if entry, ok := g.catalog.Lookup(route.Provider, route.Model); !ok || !entry.Approved {
+		return Response{}, g.denyf(ctx, subject, req, now, "modelcatalog.unapproved", "provider %q model %q is not an approved Model Catalog entry", route.Provider, route.Model)
 	}
 
 	action := types.Action{Type: "model_call", Tool: req.Purpose}
@@ -237,6 +250,9 @@ func (g *Gateway) call(ctx context.Context, route Route, req Request) (Response,
 	}
 	if route.FallbackProvider == "" {
 		return Response{}, fmt.Errorf("provider %q failed and no fallback is configured: %w", route.Provider, err)
+	}
+	if entry, ok := g.catalog.Lookup(route.FallbackProvider, route.FallbackModel); !ok || !entry.Approved {
+		return Response{}, fmt.Errorf("provider %q failed (%w), and fallback provider %q model %q is not an approved Model Catalog entry", route.Provider, err, route.FallbackProvider, route.FallbackModel)
 	}
 	slog.Warn("model gateway falling back", "purpose", req.Purpose, "from_provider", route.Provider, "to_provider", route.FallbackProvider, "error", err)
 	fallback := g.providers[route.FallbackProvider]

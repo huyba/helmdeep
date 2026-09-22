@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/huyba/helmdeep/pkg/audit"
+	"github.com/huyba/helmdeep/pkg/modelcatalog"
 	"github.com/huyba/helmdeep/pkg/types"
 )
 
@@ -72,16 +73,34 @@ func testSubject() types.Subject {
 	return types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
 }
 
+// mustNewCatalog builds a *modelcatalog.Registry from entries, failing the
+// test on any validation error.
+func mustNewCatalog(t *testing.T, entries ...modelcatalog.Entry) *modelcatalog.Registry {
+	t.Helper()
+	r, err := modelcatalog.New(entries)
+	if err != nil {
+		t.Fatalf("modelcatalog.New: %v", err)
+	}
+	return r
+}
+
+// approvedCatalog declares ("p", "v1") approved — the provider+model pair
+// every test in this file that doesn't build its own catalog uses.
+func approvedCatalog(t *testing.T) *modelcatalog.Registry {
+	t.Helper()
+	return mustNewCatalog(t, modelcatalog.Entry{Provider: "p", Model: "v1", Approved: true})
+}
+
 func TestNew_RejectsLatestAsAModelVersion(t *testing.T) {
 	providers := map[string]Provider{"p": &stubProvider{name: "p"}}
-	_, err := New(providers, map[string]Route{testPurpose: {Provider: "p", Model: "latest"}}, stubDecider{}, &recordingAuditStore{})
+	_, err := New(providers, map[string]Route{testPurpose: {Provider: "p", Model: "latest"}}, stubDecider{}, &recordingAuditStore{}, mustNewCatalog(t))
 	if err == nil {
 		t.Fatal("New: expected an error for a route pinned to \"latest\"")
 	}
 }
 
 func TestNew_RejectsUnknownProvider(t *testing.T) {
-	_, err := New(map[string]Provider{}, map[string]Route{testPurpose: {Provider: "nope", Model: "v1"}}, stubDecider{}, &recordingAuditStore{})
+	_, err := New(map[string]Provider{}, map[string]Route{testPurpose: {Provider: "nope", Model: "v1"}}, stubDecider{}, &recordingAuditStore{}, mustNewCatalog(t))
 	if err == nil {
 		t.Fatal("New: expected an error for a route referencing an unconfigured provider")
 	}
@@ -91,7 +110,7 @@ func TestComplete_AllowedCallReachesProviderAndRecordsTwoRecords(t *testing.T) {
 	p := &stubProvider{name: "p", resp: Response{Model: "v1-resolved", Content: "hi"}}
 	store := &recordingAuditStore{}
 	gw, err := New(map[string]Provider{"p": p}, map[string]Route{testPurpose: {Provider: "p", Model: "v1"}},
-		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, store)
+		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, store, approvedCatalog(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -118,7 +137,7 @@ func TestComplete_DeniedByPolicyNeverCallsProvider(t *testing.T) {
 	p := &stubProvider{name: "p"}
 	store := &recordingAuditStore{}
 	gw, err := New(map[string]Provider{"p": p}, map[string]Route{testPurpose: {Provider: "p", Model: "v1"}},
-		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeDeny, PolicyID: "test.deny", Reason: "no"}}, store)
+		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeDeny, PolicyID: "test.deny", Reason: "no"}}, store, approvedCatalog(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -143,7 +162,7 @@ func TestComplete_DeniedByPolicyNeverCallsProvider(t *testing.T) {
 // not a shared helper, so it needs its own regression lock.
 func TestComplete_ZeroValueDecisionResponseIsDenied(t *testing.T) {
 	p := &stubProvider{name: "p"}
-	gw, err := New(map[string]Provider{"p": p}, map[string]Route{testPurpose: {Provider: "p", Model: "v1"}}, stubDecider{}, &recordingAuditStore{})
+	gw, err := New(map[string]Provider{"p": p}, map[string]Route{testPurpose: {Provider: "p", Model: "v1"}}, stubDecider{}, &recordingAuditStore{}, approvedCatalog(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -156,7 +175,7 @@ func TestComplete_ZeroValueDecisionResponseIsDenied(t *testing.T) {
 }
 
 func TestComplete_UnknownPurposeIsDenied(t *testing.T) {
-	gw, err := New(map[string]Provider{}, map[string]Route{}, stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow}}, &recordingAuditStore{})
+	gw, err := New(map[string]Provider{}, map[string]Route{}, stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow}}, &recordingAuditStore{}, mustNewCatalog(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -169,7 +188,7 @@ func TestComplete_AuditWriteFailureDeniesAndDoesNotCallProvider(t *testing.T) {
 	p := &stubProvider{name: "p"}
 	store := &recordingAuditStore{err: errors.New("disk full")}
 	gw, err := New(map[string]Provider{"p": p}, map[string]Route{testPurpose: {Provider: "p", Model: "v1"}},
-		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, store)
+		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, store, approvedCatalog(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -189,6 +208,10 @@ func TestComplete_FallsBackOnPrimaryFailureAndRecordsIt(t *testing.T) {
 		map[string]Provider{"primary": primary, "fallback": fallback},
 		map[string]Route{testPurpose: {Provider: "primary", Model: "v1", FallbackProvider: "fallback", FallbackModel: "fb-1"}},
 		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, store,
+		mustNewCatalog(t,
+			modelcatalog.Entry{Provider: "primary", Model: "v1", Approved: true},
+			modelcatalog.Entry{Provider: "fallback", Model: "fb-1", Approved: true},
+		),
 	)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -229,6 +252,10 @@ func TestComplete_BothPrimaryAndFallbackFailingReturnsError(t *testing.T) {
 		map[string]Provider{"primary": primary, "fallback": fallback},
 		map[string]Route{testPurpose: {Provider: "primary", Model: "v1", FallbackProvider: "fallback", FallbackModel: "fb-1"}},
 		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, store,
+		mustNewCatalog(t,
+			modelcatalog.Entry{Provider: "primary", Model: "v1", Approved: true},
+			modelcatalog.Entry{Provider: "fallback", Model: "fb-1", Approved: true},
+		),
 	)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -238,5 +265,71 @@ func TestComplete_BothPrimaryAndFallbackFailingReturnsError(t *testing.T) {
 	}
 	if len(store.records) != 2 || store.records[1].Outcome != types.RecordOutcomeFailed {
 		t.Fatalf("records = %+v, want [allowed, failed]", store.records)
+	}
+}
+
+// TestComplete_UnapprovedModelIsDenied is the Model Catalog's own version
+// of the Tool Registry's undeclared-tool gate: a route is fully
+// configured and the policy would allow it, but the route's
+// provider+model pair is not an approved Model Catalog entry — denied
+// before any provider is ever reached.
+func TestComplete_UnapprovedModelIsDenied(t *testing.T) {
+	p := &stubProvider{name: "p"}
+	emptyCatalog := mustNewCatalog(t) // declares nothing
+	gw, err := New(map[string]Provider{"p": p}, map[string]Route{testPurpose: {Provider: "p", Model: "v1"}},
+		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, &recordingAuditStore{}, emptyCatalog)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := gw.Complete(context.Background(), testSubject(), Request{Purpose: testPurpose}); err == nil {
+		t.Fatal("Complete: a route whose model is absent from the Model Catalog was allowed")
+	}
+	if p.called {
+		t.Fatal("provider was called despite the model being unapproved")
+	}
+}
+
+// TestComplete_UnapprovedEntryIsDenied covers the other half: the pair is
+// declared in the catalog, but Approved is false — still denied.
+func TestComplete_UnapprovedEntryIsDenied(t *testing.T) {
+	p := &stubProvider{name: "p"}
+	catalog := mustNewCatalog(t, modelcatalog.Entry{Provider: "p", Model: "v1", Approved: false})
+	gw, err := New(map[string]Provider{"p": p}, map[string]Route{testPurpose: {Provider: "p", Model: "v1"}},
+		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, &recordingAuditStore{}, catalog)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := gw.Complete(context.Background(), testSubject(), Request{Purpose: testPurpose}); err == nil {
+		t.Fatal("Complete: a catalog entry with Approved=false was allowed")
+	}
+	if p.called {
+		t.Fatal("provider was called despite Approved=false")
+	}
+}
+
+// TestComplete_FallbackToAnUnapprovedModelFails: the primary fails, and
+// the configured fallback pair is not approved — the whole call must
+// fail, not silently skip the catalog check just because a fallback path
+// was taken.
+func TestComplete_FallbackToAnUnapprovedModelFails(t *testing.T) {
+	primary := &stubProvider{name: "primary", err: errors.New("rate limited")}
+	fallback := &stubProvider{name: "fallback"}
+	catalog := mustNewCatalog(t, modelcatalog.Entry{Provider: "primary", Model: "v1", Approved: true}) // fallback NOT approved
+	gw, err := New(
+		map[string]Provider{"primary": primary, "fallback": fallback},
+		map[string]Route{testPurpose: {Provider: "primary", Model: "v1", FallbackProvider: "fallback", FallbackModel: "fb-1"}},
+		stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}, &recordingAuditStore{}, catalog,
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if _, err := gw.Complete(context.Background(), testSubject(), Request{Purpose: testPurpose}); err == nil {
+		t.Fatal("Complete: fell back to an unapproved model without error")
+	}
+	if fallback.called {
+		t.Fatal("fallback provider was called despite not being an approved Model Catalog entry")
 	}
 }
