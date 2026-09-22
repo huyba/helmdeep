@@ -107,6 +107,15 @@ other control-plane service did. See `docs/adr/0008-tool-registry.md` for
 what's still missing (JSON Schema validation, reversibility taxonomy,
 egress control, registry-sourced limits).
 
+**Agent registry partially delivered ahead of this phase.**
+`pkg/agentregistry` implements the same "undeclared identities are
+refused" rule one level up, applied to *who* is calling rather than
+*what* is being called — an agent id absent from it is refused, and an
+optional per-agent version pin denies a calling instance asserting a
+different one. See `docs/adr/0012-agent-registry.md` for what's still
+missing (no persistent store, no owning-group/lifecycle governance from
+`docs/09-governance-trust.md` §6, no autonomy-ceiling enforcement).
+
 ## What's explicitly not planned here
 
 Natural-language agent scaffolding, shadow-agent discovery, and a policy
