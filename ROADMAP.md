@@ -57,6 +57,14 @@ enforced in `internal/gateway` and `pkg/mcp` — see
 `docs/adr/0009-egress-default-deny.md` for what doc 05 §3 still describes
 that this does not implement (DNS/TLS pinning, DLP, egress byte budget).
 
+**Python SDK and dev emulator partially delivered (Milestone M4).**
+`sdk/python` is a minimal, dependency-free MCP client (docs/01-requirements.md
+FR-B2, Python only — no TypeScript SDK); `cmd/dev-issuer` and
+`examples/dev-emulator/` are the "local emulator running the same runtime
+contract as production" FR-B3 asks for. See
+`docs/adr/0010-python-sdk-and-dev-emulator.md` for what's not implemented
+(TypeScript, framework adapters, agent artifacts, traces/evals).
+
 ## Phase 3 — Model Gateway
 
 Fills in `pkg/modelgw`: routing, version pinning, caching, quotas,

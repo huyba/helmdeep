@@ -36,6 +36,8 @@ controls.
 | MCP protocol handling | **Implemented** — Streamable HTTP, 2026-07-28 spec | `pkg/mcp` |
 | Identity & credential exchange | **Partial** — real JWT verification + credential broker (Milestone M1) | `pkg/identity`, `internal/devissuer` |
 | Tool Registry | **Partial** — risk rating, data classes, required scopes; undeclared-tool refusal enforced (Milestone M2) | `pkg/toolregistry` |
+| Egress control | **Partial** — per-tool upstream allowlist, cloud-metadata block (Milestone M3) | `internal/gateway`, `pkg/mcp/egress.go` |
+| Python SDK + dev emulator | **Partial** — wire-protocol client, dev-issuer binary, docker-compose emulator (Milestone M4) | `sdk/python`, `cmd/dev-issuer`, `examples/dev-emulator` |
 | Model Gateway | Interface only — no implementation | `pkg/modelgw` |
 | Agent sandbox runtime | Interface only — no implementation | `pkg/sandbox` |
 | Scheduler | Interface only — no implementation | `pkg/scheduler` |
