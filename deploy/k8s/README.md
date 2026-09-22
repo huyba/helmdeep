@@ -1,7 +1,7 @@
 # Kubernetes manifests
 
 Plain manifests, not a Helm chart — deliberately, for a single-service demo
-deployment. `configmap.yaml`, `secret.yaml`, `deployment.yaml`,
+deployment. `configmap.yaml`, `secret.yaml`, `pvc.yaml`, `deployment.yaml`,
 `service.yaml`.
 
 ## Try it locally (kind/minikube)
@@ -17,6 +17,7 @@ minikube image load helmdeep-tool-gateway:latest
 
 kubectl apply -f deploy/k8s/configmap.yaml
 kubectl apply -f deploy/k8s/secret.yaml   # example values — see the file's own warning
+kubectl apply -f deploy/k8s/pvc.yaml      # audit log volume — uses the cluster's default StorageClass
 kubectl apply -f deploy/k8s/deployment.yaml
 kubectl apply -f deploy/k8s/service.yaml
 
@@ -86,6 +87,12 @@ band: `kubectl create secret generic helmdeep-tool-gateway-secrets
 all still deploys and runs — just without those upstream credentials
 configured.
 
+**Nodes and image architecture.** The workflow builds `linux/amd64` and
+`linux/arm64` (`deploy/docker/Dockerfile.multiarch`, cross-compiled, no QEMU),
+so the same image runs on x86 or ARM node pools. The node pool is ARM
+(`Standard_B2pls_v2`, about $1/day of VM) because that is the cheapest size
+this subscription's quota allows that meets AKS's 4 GB system-pool minimum.
+
 **Verify a deployment manually** (same commands the workflow runs):
 
 ```sh
@@ -104,14 +111,23 @@ kubectl port-forward svc/helmdeep-tool-gateway 8443:8443
   minute *per pod that happens to answer*) and breaks provenance
   correlation across pods. Don't raise `replicas` without addressing that
   first.
-- **The audit log lives in an `emptyDir`.** It does not survive a pod
-  restart or reschedule. Replace with a `PersistentVolumeClaim` — and
-  decide what "durable" means for your audit requirement — before this
-  deployment holds anything you'd need to produce as evidence later.
-- **No dedicated health endpoint.** The probes are TCP-socket checks
-  against the MCP port, which prove the process is up, not that policy
-  loaded correctly or the audit log is writable. A real `/healthz` would
-  be a meaningfully better signal; it doesn't exist yet.
+- **The audit log is on a PersistentVolumeClaim (`pvc.yaml`), but the
+  default StorageClass deletes the disk with the claim.** It survives pod
+  restarts and reschedules (the chain resumes from the last record — see
+  `pkg/audit`), and it is a single-writer hash chain on a ReadWriteOnce
+  disk, which is why the Deployment uses `strategy: Recreate` (a few
+  seconds of downtime per deploy) and `replicas: 1`. But AKS's default
+  class has `reclaimPolicy: Delete`: deleting the PVC or namespace deletes
+  the log. Use a `Retain` class or disk snapshots before it holds evidence
+  you must keep. It is also still one file on one disk, not an
+  off-cluster, append-only store.
+- **Health probes are real but shallow.** `/livez` only proves the process
+  answers HTTP and drives the liveness probe; `/healthz` (readiness)
+  checks the policy bundle is loaded and the audit log can be opened for
+  append and fsynced. It does not check upstream reachability (a slow
+  upstream must not pull the whole gateway out of rotation) and cannot
+  detect a merely full disk — only a real write would. See
+  `internal/health`.
 - **`secret.yaml` ships placeholder values.** Read its own comments before
   applying it anywhere real.
 - **Identity is `-dev-insecure` static tokens, not real verification.**
