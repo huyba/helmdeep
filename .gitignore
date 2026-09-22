@@ -2,3 +2,9 @@
 *.out
 *.test
 .DS_Store
+
+# Python (sdk/python) — build/test artifacts, never source.
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
