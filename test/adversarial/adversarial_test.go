@@ -20,6 +20,7 @@ import (
 
 	"github.com/huyba/helmdeep/internal/gateway"
 	"github.com/huyba/helmdeep/internal/mockupstream"
+	"github.com/huyba/helmdeep/pkg/agentregistry"
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
@@ -99,7 +100,19 @@ func startGateway(t *testing.T, policyPath string, identities map[string]gateway
 		t.Fatalf("toolregistry.New: %v", err)
 	}
 
-	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil, toolReg)
+	// Same convention as the Tool Registry above: register every agent
+	// identity this call's identities map declares, since this suite is
+	// almost never testing the Agent Registry gate itself.
+	var agentEntries []agentregistry.Entry
+	for _, id := range identities {
+		agentEntries = append(agentEntries, agentregistry.Entry{AgentID: id.ID})
+	}
+	agentReg, err := agentregistry.New(agentEntries)
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+
+	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil, toolReg, agentReg)
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "adversarial-test")
 
 	ts := httptest.NewServer(gwServer.Handler())

@@ -11,6 +11,7 @@ import (
 
 	"github.com/huyba/helmdeep/internal/gateway"
 	"github.com/huyba/helmdeep/internal/mockupstream"
+	"github.com/huyba/helmdeep/pkg/agentregistry"
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
@@ -72,7 +73,12 @@ func newToolRegistryTestGateway(t *testing.T, callerScopes []string) (endpoint s
 		t.Fatalf("toolregistry.New: %v", err)
 	}
 
-	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0, nil, toolReg)
+	agentReg, err := agentregistry.New([]agentregistry.Entry{{AgentID: "agent:test"}})
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+
+	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0, nil, toolReg, agentReg)
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
 	gwTS := httptest.NewServer(gwServer.Handler())
 	t.Cleanup(gwTS.Close)

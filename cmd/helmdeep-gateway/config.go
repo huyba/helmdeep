@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/huyba/helmdeep/internal/gateway"
+	"github.com/huyba/helmdeep/pkg/agentregistry"
 	"github.com/huyba/helmdeep/pkg/toolregistry"
 	"github.com/huyba/helmdeep/pkg/types"
 )
@@ -91,6 +92,20 @@ type config struct {
 		DataClasses []string `json:"data_classes"`
 		Scopes      []string `json:"scopes"`
 	} `json:"tools"`
+
+	// Agents is the Agent Registry (docs/02-architecture.md §2's Control
+	// Plane, pkg/agentregistry): every agent identity this deployment
+	// declares. An agent identity absent from this list is refused
+	// outright, regardless of how it authenticated — see
+	// internal/gateway.Gateway's agentReg field and
+	// docs/adr/0012-agent-registry.md.
+	Agents []struct {
+		ID          string   `json:"id"`
+		Version     string   `json:"version"`
+		Owner       string   `json:"owner"`
+		Risk        string   `json:"risk"`
+		DataClasses []string `json:"data_classes"`
+	} `json:"agents"`
 }
 
 func loadConfig(path string) (config, error) {
@@ -126,6 +141,9 @@ func loadConfig(path string) (config, error) {
 	}
 	if _, err := cfg.toolRegistry(); err != nil {
 		return config{}, fmt.Errorf("config %s: tools: %w", path, err)
+	}
+	if _, err := cfg.agentRegistry(); err != nil {
+		return config{}, fmt.Errorf("config %s: agents: %w", path, err)
 	}
 	hasStatic := len(cfg.Identity.StaticTokens) > 0
 	hasJWT := cfg.Identity.JWT != nil
@@ -192,4 +210,22 @@ func (c config) toolRegistry() (*toolregistry.Registry, error) {
 		}
 	}
 	return toolregistry.New(entries)
+}
+
+// agentRegistry builds the Agent Registry gateway.New requires from the
+// config's agents section. An empty (but non-nil) registry is a valid
+// config — it just refuses every call, matching toolRegistry's own
+// fail-closed default.
+func (c config) agentRegistry() (*agentregistry.Registry, error) {
+	entries := make([]agentregistry.Entry, len(c.Agents))
+	for i, a := range c.Agents {
+		entries[i] = agentregistry.Entry{
+			AgentID:     a.ID,
+			Version:     a.Version,
+			Owner:       a.Owner,
+			Risk:        a.Risk,
+			DataClasses: a.DataClasses,
+		}
+	}
+	return agentregistry.New(entries)
 }

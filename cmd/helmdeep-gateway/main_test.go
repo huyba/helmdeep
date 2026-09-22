@@ -196,6 +196,64 @@ func TestLoadConfig_ToolsValidation(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_AgentsValidation covers what config.go's agentRegistry()
+// already enforces via agentregistry.New: a duplicate agent id fails at
+// config load, not at the first call that happens to hit it.
+func TestLoadConfig_AgentsValidation(t *testing.T) {
+	identity := `identity:
+  static_tokens:
+    tok:
+      id: agent:test
+`
+
+	tests := []struct {
+		name       string
+		agents     string
+		wantErrSub string // empty means no error expected
+	}{
+		{
+			name:       "no agents section is valid — an empty Agent Registry, deny-everything by default",
+			agents:     "",
+			wantErrSub: "",
+		},
+		{
+			name: "a declared agent is valid",
+			agents: `agents:
+  - id: agent:support-bot
+    owner: support-team
+    risk: low
+`,
+			wantErrSub: "",
+		},
+		{
+			name: "a duplicate agent id is rejected at config load",
+			agents: `agents:
+  - id: agent:support-bot
+    owner: support-team
+  - id: agent:support-bot
+    owner: someone-else
+`,
+			wantErrSub: "registered more than once",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTestConfig(t, baseTestConfig+identity+tt.agents)
+			_, err := loadConfig(path)
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("loadConfig: unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("loadConfig: expected an error containing %q, got nil", tt.wantErrSub)
+			}
+		})
+	}
+}
+
 func TestLoadConfig_RejectsMCPPathThatCollidesWithHealthEndpoints(t *testing.T) {
 	identity := `identity:
   static_tokens:

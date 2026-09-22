@@ -137,7 +137,11 @@ func runServe(args []string) error {
 	if err != nil {
 		return err // already validated in loadConfig; defensive
 	}
-	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance(), decisionTimeout, broker, toolReg)
+	agentReg, err := cfg.agentRegistry()
+	if err != nil {
+		return err // already validated in loadConfig; defensive
+	}
+	gw := gateway.New(identityResolver, pdp, auditStore, registry, cfg.upstreamProvenance(), decisionTimeout, broker, toolReg, agentReg)
 	server := mcp.NewServer(cfg.Listen, cfg.Path, gw, version)
 
 	// /livez: process is up. /healthz: policy is loaded and the audit log

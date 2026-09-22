@@ -22,6 +22,7 @@ import (
 
 	"github.com/huyba/helmdeep/internal/gateway"
 	"github.com/huyba/helmdeep/internal/mockupstream"
+	"github.com/huyba/helmdeep/pkg/agentregistry"
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
@@ -48,6 +49,23 @@ func registerAllTools(t testing.TB, reg mcp.Registry) *toolregistry.Registry {
 		t.Fatalf("toolregistry.New: %v", err)
 	}
 	return toolReg
+}
+
+// registerAllAgents builds an Agent Registry declaring every agent id in
+// identities, unversioned (no version-pinning check) — same "most of this
+// suite is testing something other than this gate" convention as
+// registerAllTools.
+func registerAllAgents(t testing.TB, identities map[string]gateway.StaticIdentity) *agentregistry.Registry {
+	t.Helper()
+	entries := make([]agentregistry.Entry, 0, len(identities))
+	for _, id := range identities {
+		entries = append(entries, agentregistry.Entry{AgentID: id.ID})
+	}
+	agentReg, err := agentregistry.New(entries)
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	return agentReg
 }
 
 const (
@@ -120,17 +138,18 @@ func newTestGatewayWithPolicy(t testing.TB, policyPath string) (endpoint string,
 		t.Fatalf("NewFileStore: %v", err)
 	}
 
-	resolver := gateway.NewStaticTokenResolver(map[string]gateway.StaticIdentity{
+	identities := map[string]gateway.StaticIdentity{
 		supportToken: {ID: "agent:support-bot", Kind: types.SubjectKindAgent},
 		financeToken: {ID: "agent:finance-bot", Kind: types.SubjectKindAgent},
-	})
+	}
+	resolver := gateway.NewStaticTokenResolver(identities)
 
 	provenance := map[string]types.Provenance{
 		"suppliermaster": {Source: "suppliermaster", Trusted: true},
 		"email":          {Source: "email", Trusted: false},
 	}
 
-	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil, registerAllTools(t, registry))
+	gw := gateway.New(resolver, pdp, auditStore, registry, provenance, 0, nil, registerAllTools(t, registry), registerAllAgents(t, identities))
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
 
 	ts := httptest.NewServer(gwServer.Handler())
@@ -460,10 +479,11 @@ decision := {"outcome": "allow", "policy_id": "test.allow"}
 	}
 
 	const token = "test-token"
-	resolver := gateway.NewStaticTokenResolver(map[string]gateway.StaticIdentity{
+	identities := map[string]gateway.StaticIdentity{
 		token: {ID: "agent:test", Kind: types.SubjectKindAgent},
-	})
-	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0, nil, registerAllTools(t, registry))
+	}
+	resolver := gateway.NewStaticTokenResolver(identities)
+	gw := gateway.New(resolver, pdp, auditStore, registry, nil, 0, nil, registerAllTools(t, registry), registerAllAgents(t, identities))
 	gwServer := mcp.NewServer(":0", "/mcp", gw, "e2e-test")
 	ts := httptest.NewServer(gwServer.Handler())
 	t.Cleanup(ts.Close)
