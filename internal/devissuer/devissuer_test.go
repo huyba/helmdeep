@@ -19,7 +19,7 @@ func TestIssueSITRoundTrips(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	token, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com", "agent:finance-bot"}, []string{"supplier.read"}, 15*time.Minute)
+	token, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com", "agent:finance-bot"}, []string{"supplier.read"}, "1.2.0", 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -42,6 +42,10 @@ func TestIssueSITRoundTrips(t *testing.T) {
 	if err := tok.Get("scope", &scope); err != nil || len(scope) != 1 || scope[0] != "supplier.read" {
 		t.Fatalf("scope = %v, err=%v, want [supplier.read]", scope, err)
 	}
+	var agentVersion string
+	if err := tok.Get("agent_version", &agentVersion); err != nil || agentVersion != "1.2.0" {
+		t.Fatalf("agent_version = %q, err=%v, want 1.2.0", agentVersion, err)
+	}
 }
 
 func TestIssueSITRejectsEmptyAgent(t *testing.T) {
@@ -49,7 +53,7 @@ func TestIssueSITRejectsEmptyAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := iss.IssueSIT("", nil, nil, time.Minute); err == nil {
+	if _, err := iss.IssueSIT("", nil, nil, "", time.Minute); err == nil {
 		t.Fatal("IssueSIT with an empty agent ID should error")
 	}
 }
@@ -62,7 +66,7 @@ func TestExpiredSITFailsVerification(t *testing.T) {
 	fixedNow := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	iss.now = func() time.Time { return fixedNow }
 
-	token, err := iss.IssueSIT("agent:test", nil, nil, time.Minute)
+	token, err := iss.IssueSIT("agent:test", nil, nil, "", time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}
@@ -85,7 +89,7 @@ func TestForgedSITFailsVerification(t *testing.T) {
 		t.Fatalf("New (other): %v", err)
 	}
 
-	forged, err := other.IssueSIT("agent:attacker", nil, nil, time.Minute)
+	forged, err := other.IssueSIT("agent:attacker", nil, nil, "", time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT (other): %v", err)
 	}
@@ -104,7 +108,7 @@ func TestExchangeMintsScopedShortLivedToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	sit, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com"}, []string{"supplier.read"}, 15*time.Minute)
+	sit, err := iss.IssueSIT("agent:finance-bot", []string{"user:marcus@corp.com"}, []string{"supplier.read"}, "", 15*time.Minute)
 	if err != nil {
 		t.Fatalf("IssueSIT: %v", err)
 	}

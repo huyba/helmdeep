@@ -20,11 +20,13 @@ import (
 //
 // Claims read: `agent` (required — the agent definition ID),
 // `delegation_chain` (optional — an ordered list of principal identifiers,
-// outermost first), and `scope` (optional — the scopes this token grants,
-// types.Subject.Scopes; docs/04-identity-authz.md §1.1). The signature and
-// `exp`/`aud` are verified by the underlying jwt.Parse call; a Subject is
-// only ever returned for a token whose signature and standard claims both
-// check out.
+// outermost first), `scope` (optional — the scopes this token grants,
+// types.Subject.Scopes), and `agent_version` (optional — the version this
+// calling instance asserts it is running, types.Subject.AgentVersion;
+// docs/04-identity-authz.md §1.1). The signature and `exp`/`aud` are
+// verified by the underlying jwt.Parse call; a Subject is only ever
+// returned for a token whose signature and standard claims both check
+// out.
 type JWTResolver struct {
 	keySet   jwk.Set
 	audience string
@@ -64,11 +66,15 @@ func (r *JWTResolver) Resolve(ctx context.Context, credential string) (types.Sub
 	var scope []string
 	_ = tok.Get("scope", &scope) // optional; absence isn't an error
 
+	var agentVersion string
+	_ = tok.Get("agent_version", &agentVersion) // optional; absence isn't an error
+
 	return types.Subject{
 		ID:              agentID,
 		Kind:            types.SubjectKindAgent,
 		DelegationChain: chain,
 		Scopes:          scope,
+		AgentVersion:    agentVersion,
 	}, nil
 }
 
