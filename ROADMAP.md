@@ -76,8 +76,15 @@ not.
 (Milestone M5).** Two real providers (Azure OpenAI, Anthropic),
 policy-gated and audited on the same ledger the Tool Gateway writes to.
 See `docs/adr/0011-model-gateway.md` for what doc 07 still describes that
-this does not implement (Model Catalog, routing policy, safety pipeline,
-caching).
+this does not implement (routing policy, safety pipeline, caching).
+
+**Model Catalog partially delivered ahead of Phase 6's full scope.**
+`pkg/modelcatalog` enforces doc 07 §3's routing hard constraint — a
+route's provider+model must be an approved catalog entry, or the call is
+refused — verified against the real Azure OpenAI resource. See
+`docs/adr/0013-model-catalog.md` for what's not implemented (eval-scorecard-derived
+approval, per-request data-class/residency enforcement, cost/quality-based
+ranking).
 
 ## Phase 4 — Agent sandbox runtime
 
@@ -115,6 +122,15 @@ optional per-agent version pin denies a calling instance asserting a
 different one. See `docs/adr/0012-agent-registry.md` for what's still
 missing (no persistent store, no owning-group/lifecycle governance from
 `docs/09-governance-trust.md` §6, no autonomy-ceiling enforcement).
+
+Three of doc 02 §2's eight Control Plane components now have a real,
+narrow implementation ahead of this phase's full Postgres-backed design:
+Tool Registry, Agent Registry, and Model Catalog. Policy Service, Trust
+Engine, Approval Service, Eval Service, and Tenant/Org Service remain —
+Trust Engine deliberately not attempted as a narrow slice yet: doc 09
+§1.1 warns that a naive promotion rule is "the most likely way this
+feature fails in production," and its real inputs (Approval Service,
+Eval Service) don't exist to derive one honestly from.
 
 ## What's explicitly not planned here
 

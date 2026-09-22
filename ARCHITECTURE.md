@@ -37,6 +37,7 @@ controls.
 | Identity & credential exchange | **Partial** — real JWT verification + credential broker (Milestone M1) | `pkg/identity`, `internal/devissuer` |
 | Tool Registry | **Partial** — risk rating, data classes, required scopes; undeclared-tool refusal enforced (Milestone M2) | `pkg/toolregistry` |
 | Agent Registry | **Partial** — owner, risk, data classes, optional version pin; undeclared-agent refusal enforced | `pkg/agentregistry` |
+| Model Catalog | **Partial** — approved status, data classes, residency (descriptive); unapproved-model refusal enforced | `pkg/modelcatalog` |
 | Egress control | **Partial** — per-tool upstream allowlist, cloud-metadata block (Milestone M3) | `internal/gateway`, `pkg/mcp/egress.go` |
 | Python SDK + dev emulator | **Partial** — wire-protocol client, dev-issuer binary, docker-compose emulator (Milestone M4) | `sdk/python`, `cmd/dev-issuer`, `examples/dev-emulator` |
 | Model Gateway | **Partial** — 2 real providers, policy-gated, same ledger as the Tool Gateway (Milestone M5) | `pkg/modelgw` |
@@ -224,6 +225,11 @@ implemented yet," it grew its own home. See `docs/adr/0008-tool-registry.md`.
 also listed under Control Plane in doc 02 §2 — enforcing "undeclared
 agent identities are refused" the same way `pkg/toolregistry` enforces it
 for tools. See `docs/adr/0012-agent-registry.md`.
+
+**`pkg/modelcatalog`** is the third: the Model Catalog, also under
+Control Plane in doc 02 §2, gates `pkg/modelgw.Gateway` — a route's
+provider+model must be an approved entry or the call is refused. See
+`docs/adr/0013-model-catalog.md`.
 
 `pkg/types` has no dependencies on any other package in this repo, by
 design — everything else depends on it, so it cannot depend back without
