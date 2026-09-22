@@ -34,6 +34,14 @@ const (
 // Milestone M2, from the same SIT's `scope` claim. This is deliberately
 // separate from a tool's *required* scopes (pkg/toolregistry.Entry.Scopes):
 // a policy compares the two, this type only carries what the caller has.
+//
+// AgentVersion is what the calling instance's own credential asserts it is
+// running — as of the Agent Registry milestone, from the same SIT's
+// `agent_version` claim (doc 04 §1.1). It is deliberately separate from
+// the Agent Registry's own declared version
+// (pkg/agentregistry.Entry.Version): internal/gateway compares the two
+// (an instance claiming a version the registry doesn't recognize for this
+// agent is denied), this type only carries what the caller asserted.
 type Subject struct {
 	ID              string      `json:"id"`
 	Kind            SubjectKind `json:"kind"`
