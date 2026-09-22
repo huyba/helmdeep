@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/huyba/helmdeep/pkg/agentregistry"
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
@@ -26,6 +27,26 @@ func mustNewToolRegistry(t *testing.T, entries ...toolregistry.Entry) *toolregis
 		t.Fatalf("toolregistry.New: %v", err)
 	}
 	return r
+}
+
+// mustNewAgentRegistry builds an *agentregistry.Registry from entries,
+// failing the test on any validation error — every test in this file that
+// isn't specifically exercising the undeclared-agent gate needs its
+// calling agent declared, or CallTool would deny it for the wrong reason.
+func mustNewAgentRegistry(t *testing.T, entries ...agentregistry.Entry) *agentregistry.Registry {
+	t.Helper()
+	r, err := agentregistry.New(entries)
+	if err != nil {
+		t.Fatalf("agentregistry.New: %v", err)
+	}
+	return r
+}
+
+// testAgentReg declares exactly "agent:test", the subject every test in
+// this file that doesn't build its own registry uses.
+func testAgentReg(t *testing.T) *agentregistry.Registry {
+	t.Helper()
+	return mustNewAgentRegistry(t, agentregistry.Entry{AgentID: "agent:test"})
 }
 
 // stubResolver always resolves to the same subject, regardless of credential.
@@ -148,7 +169,7 @@ func newTestGatewayWithOpts(t *testing.T, decider policy.Decider, decisionTimeou
 
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
 	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow})
-	gw := New(stubResolver{subject: subject}, decider, store, registry, nil, decisionTimeout, nil, toolReg)
+	gw := New(stubResolver{subject: subject}, decider, store, registry, nil, decisionTimeout, nil, toolReg, testAgentReg(t))
 	return gw, upstream, store, registry
 }
 
@@ -310,7 +331,7 @@ func TestUndeclaredToolIsDeniedNotProtocolError(t *testing.T) {
 	emptyToolReg := mustNewToolRegistry(t) // declares nothing
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
 	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
-	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, emptyToolReg)
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, emptyToolReg, testAgentReg(t))
 
 	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
 	if err != nil {
@@ -334,7 +355,7 @@ func TestUnregisteredToolNeverAppearsInToolsList(t *testing.T) {
 	emptyToolReg := mustNewToolRegistry(t) // declares nothing
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
 	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
-	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, emptyToolReg)
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, emptyToolReg, testAgentReg(t))
 
 	result, err := gw.ListTools(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "")
 	if err != nil {
@@ -374,7 +395,7 @@ func TestActionCarriesToolRegistryMetadata(t *testing.T) {
 	})
 	decider := &capturingDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
-	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg)
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, testAgentReg(t))
 
 	if _, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil); err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -405,7 +426,7 @@ func TestUpstreamMismatchIsDenied(t *testing.T) {
 	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Upstream: "declared-upstream", Risk: toolregistry.RiskLow})
 	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
-	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg)
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, testAgentReg(t))
 
 	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
 	if err != nil {
@@ -427,7 +448,7 @@ func TestMatchingUpstreamIsAllowed(t *testing.T) {
 	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Upstream: "the-upstream", Risk: toolregistry.RiskLow})
 	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
-	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg)
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, testAgentReg(t))
 
 	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
 	if err != nil {
@@ -450,7 +471,7 @@ func TestEmptyUpstreamFieldSkipsTheCheck(t *testing.T) {
 	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow}) // Upstream left blank
 	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
 	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
-	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg)
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, testAgentReg(t))
 
 	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
 	if err != nil {
@@ -461,6 +482,121 @@ func TestEmptyUpstreamFieldSkipsTheCheck(t *testing.T) {
 	}
 }
 
+// TestUndeclaredAgentIsDenied is the Agent Registry's own version of
+// TestUndeclaredToolIsDeniedNotProtocolError: identity resolves and
+// verifies fine (stubResolver always succeeds), but the resolved agent id
+// is absent from the Agent Registry — a policy-shaped denial, not an
+// identity error, and the upstream must never be reached.
+func TestUndeclaredAgentIsDenied(t *testing.T) {
+	upstream := &spyUpstream{name: "test-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow})
+	emptyAgentReg := mustNewAgentRegistry(t) // declares no agents
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, emptyAgentReg)
+
+	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
+	if err != nil {
+		t.Fatalf("CallTool returned a protocol error, want a denied tool result: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("an agent absent from the Agent Registry was allowed, despite an explicit policy allow")
+	}
+	if upstream.called {
+		t.Fatal("upstream was called despite the calling agent being undeclared")
+	}
+}
+
+// TestUnregisteredAgentNeverSeesToolsList is ListTools' half of the same
+// gate: an undeclared agent must see an empty tool list, not an error —
+// the same "we don't know who you are" treatment an unresolvable
+// credential already gets.
+func TestUnregisteredAgentNeverSeesToolsList(t *testing.T) {
+	upstream := &spyUpstream{name: "test-upstream", tools: []types.Tool{{Name: "some.tool"}}}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow})
+	emptyAgentReg := mustNewAgentRegistry(t)
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, emptyAgentReg)
+
+	result, err := gw.ListTools(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(result.Tools) != 0 {
+		t.Fatalf("got %d tools, want 0 — an undeclared agent must never see any tool", len(result.Tools))
+	}
+}
+
+// TestAgentVersionMismatchIsDenied: the registry pins a version for this
+// agent, and the calling instance asserts a different one — denied, even
+// though the agent id itself is declared and the policy would allow it.
+func TestAgentVersionMismatchIsDenied(t *testing.T) {
+	upstream := &spyUpstream{name: "test-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow})
+	agentReg := mustNewAgentRegistry(t, agentregistry.Entry{AgentID: "agent:test", Version: "2.0.0"})
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent, AgentVersion: "1.0.0"}
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, agentReg)
+
+	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("an instance asserting an unapproved agent_version was allowed")
+	}
+	if upstream.called {
+		t.Fatal("upstream was called despite the agent_version mismatch")
+	}
+}
+
+// TestMatchingAgentVersionIsAllowed and TestUnassertedAgentVersionIsAllowed
+// are the two positive cases: a version pin, by itself, must not deny a
+// call that actually matches it, or one where the caller simply didn't
+// assert a version at all (the pre-Agent-Registry-milestone shape for
+// every credential minted before this field existed).
+func TestMatchingAgentVersionIsAllowed(t *testing.T) {
+	upstream := &spyUpstream{name: "test-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow})
+	agentReg := mustNewAgentRegistry(t, agentregistry.Entry{AgentID: "agent:test", Version: "1.0.0"})
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent, AgentVersion: "1.0.0"}
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, agentReg)
+
+	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("a correctly matched agent_version was denied: %+v", result)
+	}
+	if !upstream.called {
+		t.Fatal("upstream was never called despite a matching, allowed agent_version")
+	}
+}
+
+func TestUnassertedAgentVersionIsAllowed(t *testing.T) {
+	upstream := &spyUpstream{name: "test-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow})
+	agentReg := mustNewAgentRegistry(t, agentregistry.Entry{AgentID: "agent:test", Version: "1.0.0"})
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent} // AgentVersion left unset
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg, agentReg)
+
+	if _, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil); err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !upstream.called {
+		t.Fatal("upstream was never called despite the caller simply not asserting a version")
+	}
+}
+
 // TestUsageWindowResets exercises the aggregate-limit counter directly: a
 // call count that's high within one window must not still count against a
 // caller once the window has genuinely rolled over. This is only
@@ -468,7 +604,7 @@ func TestEmptyUpstreamFieldSkipsTheCheck(t *testing.T) {
 // sleeping involved.
 func TestUsageWindowResets(t *testing.T) {
 	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "t", Risk: toolregistry.RiskLow})
-	gw := New(stubResolver{subject: types.Subject{ID: "agent:test"}}, stubDecider{}, mustNewAuditStore(t), &staticRegistry{tool: types.Tool{Name: "t"}, upstream: &spyUpstream{}}, nil, 0, nil, toolReg)
+	gw := New(stubResolver{subject: types.Subject{ID: "agent:test"}}, stubDecider{}, mustNewAuditStore(t), &staticRegistry{tool: types.Tool{Name: "t"}, upstream: &spyUpstream{}}, nil, 0, nil, toolReg, testAgentReg(t))
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	gw.now = func() time.Time { return base }

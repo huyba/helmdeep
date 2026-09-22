@@ -38,6 +38,11 @@ type StaticIdentity struct {
 	// static-token deployment can still exercise Milestone M2's
 	// scope-vs-required_scopes policies without standing up JWT identity.
 	Scopes []string
+	// AgentVersion mirrors what a real JWT identity's SIT `agent_version`
+	// claim would assert (types.Subject.AgentVersion) — added for the same
+	// reason Scopes was: exercising the Agent Registry milestone's
+	// version-pinning check without standing up JWT identity.
+	AgentVersion string
 }
 
 // NewStaticTokenResolver builds a resolver from a fixed token→identity map.
@@ -48,10 +53,11 @@ func NewStaticTokenResolver(tokens map[string]StaticIdentity) *StaticTokenResolv
 	resolved := make(map[string]types.Subject, len(tokens))
 	for token, id := range tokens {
 		resolved[token] = types.Subject{
-			ID:         id.ID,
-			Kind:       id.Kind,
-			TrustLevel: id.TrustLevel,
-			Scopes:     id.Scopes,
+			ID:           id.ID,
+			Kind:         id.Kind,
+			TrustLevel:   id.TrustLevel,
+			Scopes:       id.Scopes,
+			AgentVersion: id.AgentVersion,
 		}
 	}
 	return &StaticTokenResolver{tokens: resolved}

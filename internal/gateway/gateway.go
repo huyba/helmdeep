@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/huyba/helmdeep/pkg/agentregistry"
 	"github.com/huyba/helmdeep/pkg/audit"
 	"github.com/huyba/helmdeep/pkg/identity"
 	"github.com/huyba/helmdeep/pkg/mcp"
@@ -77,6 +78,18 @@ type Gateway struct {
 	// undeclared tools," not "an operator may choose not to configure this."
 	toolReg *toolregistry.Registry
 
+	// agentReg is the Agent Registry (docs/02-architecture.md §2's Control
+	// Plane, pkg/agentregistry): the governed catalog of agent identities
+	// this deployment has actually declared. Mirrors toolReg's own
+	// contract exactly, applied to *who* is calling rather than *what* is
+	// being called — it must not be nil for the same reason toolReg must
+	// not be: an empty registry denies every call, the fail-closed
+	// default, not a silently-disabled check. A Subject with no entry
+	// here, or whose asserted AgentVersion doesn't match the registry's
+	// declared Version (when one is set), is refused before any
+	// tool-specific check even runs — see docs/adr/0012-agent-registry.md.
+	agentReg *agentregistry.Registry
+
 	usage *usageTracker
 	prov  *provenanceCache
 	now   func() time.Time
@@ -87,9 +100,9 @@ type Gateway struct {
 // matters. upstreamProvenance maps upstream name to the provenance label
 // applied to values it returns — see the field's doc comment.
 // decisionTimeout bounds each policy decision; pass 0 for no bound. broker
-// may be nil — see the field's doc comment. toolReg must not be nil — see
-// the field's doc comment.
-func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registry mcp.Registry, upstreamProvenance map[string]types.Provenance, decisionTimeout time.Duration, broker identity.CredentialBroker, toolReg *toolregistry.Registry) *Gateway {
+// may be nil — see the field's doc comment. toolReg and agentReg must not
+// be nil — see their doc comments.
+func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registry mcp.Registry, upstreamProvenance map[string]types.Provenance, decisionTimeout time.Duration, broker identity.CredentialBroker, toolReg *toolregistry.Registry, agentReg *agentregistry.Registry) *Gateway {
 	return &Gateway{
 		identity:           id,
 		pdp:                pdp,
@@ -99,6 +112,7 @@ func New(id identity.Resolver, pdp policy.Decider, auditLog audit.Store, registr
 		decisionTimeout:    decisionTimeout,
 		broker:             broker,
 		toolReg:            toolReg,
+		agentReg:           agentReg,
 		usage:              newUsageTracker(),
 		prov:               newProvenanceCache(),
 		now:                time.Now,
@@ -128,6 +142,12 @@ func (g *Gateway) decide(ctx context.Context, req types.DecisionRequest) (types.
 func (g *Gateway) ListTools(ctx context.Context, cc mcp.CallContext, cursor string) (mcp.ListToolsResult, error) {
 	subject, err := g.identity.Resolve(ctx, cc.Credential)
 	if err != nil {
+		return mcp.ListToolsResult{}, nil
+	}
+	if _, ok := g.agentDenyReason(subject); !ok {
+		// Same principle as an unresolvable credential above: an
+		// undeclared or wrong-version agent sees an empty tool list, not
+		// an error — it should not learn anything about what exists.
 		return mcp.ListToolsResult{}, nil
 	}
 
@@ -175,6 +195,9 @@ func (g *Gateway) CallTool(ctx context.Context, cc mcp.CallContext, name string,
 	subject, err := g.identity.Resolve(ctx, cc.Credential)
 	if err != nil {
 		return g.denyWithoutSubject(ctx, name, arguments, "identity.unresolved", err.Error(), now)
+	}
+	if reason, ok := g.agentDenyReason(subject); !ok {
+		return g.denyUndeclaredAgent(ctx, subject, name, reason, now)
 	}
 
 	upstream, ok := g.registry.Resolve(name)
@@ -329,6 +352,47 @@ func (g *Gateway) denyWithoutSubject(ctx context.Context, name string, arguments
 		slog.Error("failed to record unresolved-identity denial", "tool", name, "error", err)
 	}
 	return deniedResult("credential not recognized"), nil
+}
+
+// agentDenyReason reports whether subject's own agent identity — not any
+// particular tool call — is allowed to proceed at all: it must be
+// declared in the Agent Registry, and if the registry pins a Version for
+// this agent, subject's own asserted AgentVersion (when it asserted one)
+// must match. Returns ("", true) when allowed, or a human-readable reason
+// and false otherwise. Checked once, right after identity resolution, in
+// both ListTools and CallTool — before any tool-specific check runs —
+// because this is a fact about *who* is calling, not about any one call.
+func (g *Gateway) agentDenyReason(subject types.Subject) (string, bool) {
+	entry, ok := g.agentReg.Lookup(subject.ID)
+	if !ok {
+		return "agent is not registered", false
+	}
+	if entry.Version != "" && subject.AgentVersion != "" && entry.Version != subject.AgentVersion {
+		return fmt.Sprintf("agent is registered for version %q, but this instance asserts version %q", entry.Version, subject.AgentVersion), false
+	}
+	return "", true
+}
+
+// denyUndeclaredAgent handles a subject the Agent Registry either has
+// never declared, or has declared for a different version than this
+// instance asserts — a policy-shaped denial like any other, not a
+// protocol error: identity itself resolved and verified fine, it's simply
+// ungoverned (or running an unapproved version). Mirrors
+// denyUndeclaredTool's exact shape and reasoning, applied one level up —
+// see docs/adr/0012-agent-registry.md.
+func (g *Gateway) denyUndeclaredAgent(ctx context.Context, subject types.Subject, name, reason string, now time.Time) (types.ToolResult, error) {
+	decision := types.DecisionResponse{Outcome: types.OutcomeDeny, PolicyID: "agentregistry.undeclared", Reason: reason}
+	action := types.Action{Type: "tool_call", Tool: name}
+	if err := g.auditLog.Append(ctx, types.ActionRecord{
+		Timestamp: now,
+		Subject:   subject,
+		Action:    action,
+		Decision:  decision,
+		Outcome:   types.RecordOutcomeDenied,
+	}); err != nil {
+		slog.Error("failed to record undeclared-agent denial", "agent", subject.ID, "tool", name, "error", err)
+	}
+	return deniedResult(reason), nil
 }
 
 // denyUndeclaredTool handles a tool that mcp.Registry can route to (a live
