@@ -15,6 +15,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -188,6 +189,9 @@ func (g *Gateway) CallTool(ctx context.Context, cc mcp.CallContext, name string,
 	if !ok {
 		return g.denyUndeclaredTool(ctx, subject, name, now)
 	}
+	if entry.Upstream != "" && entry.Upstream != upstream.Name() {
+		return g.denyUpstreamMismatch(ctx, subject, name, entry.Upstream, upstream.Name(), now)
+	}
 
 	action := types.Action{
 		Type:           "tool_call",
@@ -345,6 +349,34 @@ func (g *Gateway) denyUndeclaredTool(ctx context.Context, subject types.Subject,
 		Outcome:   types.RecordOutcomeDenied,
 	}); err != nil {
 		slog.Error("failed to record undeclared-tool denial", "tool", name, "error", err)
+	}
+	return deniedResult(decision.Reason), nil
+}
+
+// denyUpstreamMismatch is Milestone M3's egress control (doc
+// 05-tool-gateway.md §3's per-tool destination allowlist): a tool's
+// registry entry declares which upstream it is allowed to reach
+// (pkg/toolregistry.Entry.Upstream). If mcp.Registry would actually route
+// this call somewhere else — a config or upstream catalog change that
+// silently moved the tool — the call is refused rather than silently
+// following the new destination. Skipped when Entry.Upstream is empty
+// (not yet declared): see the field's own doc comment on why that's
+// backward compatible, not a bypass.
+func (g *Gateway) denyUpstreamMismatch(ctx context.Context, subject types.Subject, name, declaredUpstream, actualUpstream string, now time.Time) (types.ToolResult, error) {
+	decision := types.DecisionResponse{
+		Outcome:  types.OutcomeDeny,
+		PolicyID: "toolregistry.upstream_mismatch",
+		Reason:   fmt.Sprintf("tool %q is registered to upstream %q, but would be routed to %q", name, declaredUpstream, actualUpstream),
+	}
+	action := types.Action{Type: "tool_call", Tool: name}
+	if err := g.auditLog.Append(ctx, types.ActionRecord{
+		Timestamp: now,
+		Subject:   subject,
+		Action:    action,
+		Decision:  decision,
+		Outcome:   types.RecordOutcomeDenied,
+	}); err != nil {
+		slog.Error("failed to record upstream-mismatch denial", "tool", name, "error", err)
 	}
 	return deniedResult(decision.Reason), nil
 }

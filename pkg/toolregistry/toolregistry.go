@@ -54,12 +54,12 @@ type Entry struct {
 	// (types.Action.Tool / types.Tool.Name) — the join key between this
 	// registry and pkg/mcp.Registry's routing table.
 	ToolID string
-	// Upstream is the upstream MCP server name this tool is expected to
-	// come from. The gateway does not currently cross-check this against
-	// pkg/mcp.Registry's actual routing (that would be a second source of
-	// truth to keep in sync) — it's descriptive metadata for an operator
-	// reading the config, and a hook for that cross-check to be added
-	// later without a schema change.
+	// Upstream is the upstream MCP server this tool is allowed to reach —
+	// Milestone M3's per-tool egress destination (doc 05-tool-gateway.md
+	// §3). internal/gateway.Gateway.CallTool enforces it: a call is
+	// refused if pkg/mcp.Registry would actually route it somewhere else.
+	// Left empty, the check is skipped (backward compatible with entries
+	// written before M3 — see docs/adr/0008-tool-registry.md).
 	Upstream string
 	// Risk is the tool's declared risk tier.
 	Risk RiskRating

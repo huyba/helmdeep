@@ -394,6 +394,73 @@ func TestActionCarriesToolRegistryMetadata(t *testing.T) {
 	}
 }
 
+// TestUpstreamMismatchIsDenied is Milestone M3's egress control (doc
+// 05-tool-gateway.md §3's per-tool destination allowlist): a tool
+// registered to one upstream must be refused if mcp.Registry would
+// actually route the call somewhere else, even though the tool itself is
+// declared and the policy would otherwise allow it.
+func TestUpstreamMismatchIsDenied(t *testing.T) {
+	upstream := &spyUpstream{name: "actual-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Upstream: "declared-upstream", Risk: toolregistry.RiskLow})
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg)
+
+	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
+	if err != nil {
+		t.Fatalf("CallTool returned a protocol error, want a denied tool result: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("a tool routed to a different upstream than its registry entry declares was allowed")
+	}
+	if upstream.called {
+		t.Fatal("upstream was called despite the declared/actual upstream mismatch")
+	}
+}
+
+// TestMatchingUpstreamIsAllowed is the positive case: a correctly declared
+// Upstream must not, by itself, deny a call that's otherwise allowed.
+func TestMatchingUpstreamIsAllowed(t *testing.T) {
+	upstream := &spyUpstream{name: "the-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Upstream: "the-upstream", Risk: toolregistry.RiskLow})
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg)
+
+	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("a correctly matched upstream was denied: %+v", result)
+	}
+	if !upstream.called {
+		t.Fatal("upstream was never called despite a matching, allowed call")
+	}
+}
+
+// TestEmptyUpstreamFieldSkipsTheCheck: an Entry left over from before
+// Milestone M3 (Upstream == "") must keep working exactly as it did,
+// matching the field's own doc comment on backward compatibility.
+func TestEmptyUpstreamFieldSkipsTheCheck(t *testing.T) {
+	upstream := &spyUpstream{name: "whatever-upstream"}
+	registry := &staticRegistry{tool: types.Tool{Name: "some.tool"}, upstream: upstream}
+	toolReg := mustNewToolRegistry(t, toolregistry.Entry{ToolID: "some.tool", Risk: toolregistry.RiskLow}) // Upstream left blank
+	decider := stubDecider{resp: types.DecisionResponse{Outcome: types.OutcomeAllow, PolicyID: "test"}}
+	subject := types.Subject{ID: "agent:test", Kind: types.SubjectKindAgent}
+	gw := New(stubResolver{subject: subject}, decider, mustNewAuditStore(t), registry, nil, 0, nil, toolReg)
+
+	result, err := gw.CallTool(context.Background(), mcp.CallContext{Credential: "irrelevant"}, "some.tool", nil)
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("an Entry with no declared Upstream was denied: %+v", result)
+	}
+}
+
 // TestUsageWindowResets exercises the aggregate-limit counter directly: a
 // call count that's high within one window must not still count against a
 // caller once the window has genuinely rolled over. This is only

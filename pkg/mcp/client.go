@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -43,7 +44,15 @@ func NewHTTPUpstream(name, baseURL, bearerToken string) *HTTPUpstream {
 		name:        name,
 		baseURL:     baseURL,
 		bearerToken: bearerToken,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+			// Doc 05-tool-gateway.md §3's egress default-deny: the transport
+			// itself refuses any connection to a link-local address, cloud
+			// metadata's reserved space — see egress.go's blockedDial.
+			Transport: &http.Transport{
+				DialContext: blockedDial((&net.Dialer{Timeout: 10 * time.Second}).DialContext),
+			},
+		},
 	}
 }
 
