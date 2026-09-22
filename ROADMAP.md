@@ -50,6 +50,13 @@ Still open: real SPIFFE/SPIRE workload identity (the current
 and Enterprise IdP integration (§6) — the human hop in a delegation chain
 is asserted by the dev issuer today, not independently verified.
 
+**Egress default-deny partially delivered ahead of full Phase 6 scope
+(Milestone M3).** A per-tool upstream allowlist and an absolute,
+DNS-rebinding-safe block on cloud-metadata (link-local) addresses are
+enforced in `internal/gateway` and `pkg/mcp` — see
+`docs/adr/0009-egress-default-deny.md` for what doc 05 §3 still describes
+that this does not implement (DNS/TLS pinning, DLP, egress byte budget).
+
 ## Phase 3 — Model Gateway
 
 Fills in `pkg/modelgw`: routing, version pinning, caching, quotas,
