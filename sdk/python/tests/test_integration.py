@@ -122,6 +122,10 @@ tools:
   - id: kb.search
     upstream: knowledgebase
     risk: low
+agents:
+  - id: agent:support-bot
+    owner: support-team
+    risk: low
 """
     )
     start([str(binaries["gateway"]), "serve", f"-config={config_path}"])
