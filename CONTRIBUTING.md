@@ -17,7 +17,7 @@ overlooked.
 | Tool Registry | **Partial** — risk rating, data classes, required scopes, undeclared-tool refusal (Milestone M2) | `pkg/toolregistry` |
 | Egress control | **Partial** — per-tool upstream allowlist, cloud-metadata block (Milestone M3) | `internal/gateway`, `pkg/mcp/egress.go` |
 | Python SDK + dev emulator | **Partial** — wire-protocol client, dev-issuer binary (Milestone M4) | `sdk/python`, `cmd/dev-issuer` |
-| Model Gateway | **Interface + stub only** — no implementation | `pkg/modelgw` |
+| Model Gateway | **Partial** — 2 real providers, policy-gated, same ledger as the Tool Gateway (Milestone M5) | `pkg/modelgw` |
 | Agent sandbox runtime | **Interface + stub only** — no implementation | `pkg/sandbox` |
 | Scheduler | **Interface + stub only** — no implementation | `pkg/scheduler` |
 | Control plane | **Interface + stub only** — no implementation | `pkg/controlplane` |

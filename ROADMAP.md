@@ -72,6 +72,13 @@ redaction, and provider fallback (`docs/07-model-gateway.md`). Only matters
 once something in this repo makes model calls, which the Tool Gateway does
 not.
 
+**Model Gateway partially delivered ahead of full Phase 3 scope
+(Milestone M5).** Two real providers (Azure OpenAI, Anthropic),
+policy-gated and audited on the same ledger the Tool Gateway writes to.
+See `docs/adr/0011-model-gateway.md` for what doc 07 still describes that
+this does not implement (Model Catalog, routing policy, safety pipeline,
+caching).
+
 ## Phase 4 — Agent sandbox runtime
 
 Fills in `pkg/sandbox`: isolated execution for agent code, per
