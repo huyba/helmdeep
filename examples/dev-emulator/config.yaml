@@ -56,3 +56,15 @@ tools:
     upstream: payments
     risk: high
     data_classes: ["financial"]
+
+# Agent Registry (docs/02-architecture.md §2's Control Plane, the Agent
+# Registry milestone): every agent identity this deployment declares —
+# see docs/adr/0012-agent-registry.md. version is left unset: a SIT minted
+# here (see this directory's README) doesn't assert one either.
+agents:
+  - id: agent:support-bot
+    owner: support-team
+    risk: low
+  - id: agent:finance-bot
+    owner: finance-team
+    risk: medium

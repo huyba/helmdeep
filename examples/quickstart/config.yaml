@@ -64,3 +64,16 @@ tools:
     upstream: payments
     risk: high
     data_classes: ["financial"]
+
+# Agent Registry (docs/02-architecture.md §2's Control Plane, the Agent
+# Registry milestone): every agent identity this deployment declares. An
+# agent id absent here is refused outright, regardless of how it
+# authenticated — see docs/adr/0012-agent-registry.md. version is left
+# unset for both: this quickstart's static tokens never assert one.
+agents:
+  - id: agent:support-bot
+    owner: support-team
+    risk: low
+  - id: agent:finance-bot
+    owner: finance-team
+    risk: medium

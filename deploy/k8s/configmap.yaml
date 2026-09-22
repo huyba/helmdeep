@@ -49,6 +49,15 @@ data:
     # together with your real tool catalog. See docs/adr/0008-tool-registry.md
     # and examples/quickstart/config.yaml for a filled-in example.
     tools: []
+
+    # Agent Registry (docs/02-architecture.md §2's Control Plane, the
+    # Agent Registry milestone): every agent identity this deployment
+    # declares — an agent absent here is refused outright, regardless of
+    # how it authenticated. Left empty for the same reason tools: is:
+    # populate it with your real agent catalog. See
+    # docs/adr/0012-agent-registry.md and examples/quickstart/config.yaml
+    # for a filled-in example.
+    agents: []
 ---
 # The Rego policy bundle, as its own ConfigMap so it can be updated (and
 # SIGHUP-reloaded, see cmd/helmdeep-gateway) independently of the rest of
