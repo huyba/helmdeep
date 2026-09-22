@@ -33,6 +33,12 @@ const AnthropicAPIVersion = "2023-06-01"
 type AnthropicProvider struct {
 	// APIKey is an Anthropic API key (console.anthropic.com -> API Keys).
 	APIKey string
+	// WorkspaceID is required only for an API key that isn't scoped to a
+	// single workspace (an org-level key) — the real API rejects such a
+	// key with HTTP 400 ("This API key is not scoped to a workspace...")
+	// unless the anthropic-workspace-id header is also sent. Leave empty
+	// for a normal, workspace-scoped key, which needs no such header.
+	WorkspaceID string
 	// BaseURL defaults to DefaultAnthropicBaseURL if empty.
 	BaseURL string
 	// HTTPClient is used for the request if non-nil; otherwise a client
@@ -118,6 +124,9 @@ func (p *AnthropicProvider) Complete(ctx context.Context, model string, req Requ
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", p.APIKey)
 	httpReq.Header.Set("anthropic-version", AnthropicAPIVersion)
+	if p.WorkspaceID != "" {
+		httpReq.Header.Set("anthropic-workspace-id", p.WorkspaceID)
+	}
 
 	client := p.HTTPClient
 	if client == nil {

@@ -76,6 +76,29 @@ func TestAnthropicProvider_DefaultsMaxTokensWhenUnset(t *testing.T) {
 	}
 }
 
+func TestAnthropicProvider_SetsWorkspaceHeaderOnlyWhenConfigured(t *testing.T) {
+	var gotHeader string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Get("anthropic-workspace-id")
+		_, _ = w.Write([]byte(`{"model":"m","content":[{"type":"text","text":"x"}],"usage":{}}`))
+	}))
+	defer ts.Close()
+
+	if _, err := (&AnthropicProvider{APIKey: "k", BaseURL: ts.URL}).Complete(context.Background(), "m", Request{Messages: []Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if gotHeader != "" {
+		t.Fatalf("anthropic-workspace-id = %q, want no header when WorkspaceID is unset", gotHeader)
+	}
+
+	if _, err := (&AnthropicProvider{APIKey: "k", BaseURL: ts.URL, WorkspaceID: "wrkspc_123"}).Complete(context.Background(), "m", Request{Messages: []Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if gotHeader != "wrkspc_123" {
+		t.Fatalf("anthropic-workspace-id = %q, want wrkspc_123", gotHeader)
+	}
+}
+
 func TestAnthropicProvider_APIErrorIsReturned(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

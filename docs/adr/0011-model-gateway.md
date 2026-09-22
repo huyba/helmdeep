@@ -29,14 +29,22 @@ why.
 Both `pkg/modelgw.AzureOpenAIProvider` and `pkg/modelgw.AnthropicProvider`
 make real HTTP calls to their real APIs — no mock/fake provider ships in
 the package (fakes exist only in tests, via `httptest.NewServer`).
-Verified directly: `AzureOpenAIProvider` was exercised against a real
-Azure OpenAI resource (`helmdeep-openai`, resource group `helmdeep-rg`,
-`gpt-4o-2024-11-20` deployed under the `Standard` SKU — `GlobalStandard`
-had zero quota in this subscription). `AnthropicProvider`'s real-API
-verification is pending an available Anthropic API key — until then it
-is verified against `pkg/modelgw/anthropic_test.go`'s fake-server tests
-only. See `pkg/modelgw/integration_test.go` for the (opt-in, skipped by
-default — decision 5) real-API tests for both.
+Verified directly, both providers: `AzureOpenAIProvider` was exercised
+against a real Azure OpenAI resource (`helmdeep-openai`, resource group
+`helmdeep-rg`, `gpt-4o-2024-11-20` deployed under the `Standard` SKU —
+`GlobalStandard` had zero quota in this subscription).
+`AnthropicProvider` was exercised against the real Anthropic Messages
+API with a real `claude-haiku-4-5-20251001` call. See
+`pkg/modelgw/integration_test.go` for the (opt-in, skipped by default —
+decision 5) real-API tests for both.
+
+One real-world wrinkle `AnthropicProvider` had to account for: an
+API key that isn't scoped to a single workspace (an org-level key) gets
+rejected outright — HTTP 400, "This API key is not scoped to a
+workspace" — unless the request also carries an `anthropic-workspace-id`
+header. `AnthropicProvider.WorkspaceID` is optional and empty by default
+(a normal, workspace-scoped key needs no such header); it exists because
+a real key this project tested against needed it, not speculatively.
 
 **Why these two:** Azure OpenAI reuses the same Azure subscription and
 resource group this project's AKS deployment already lives in — no new

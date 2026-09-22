@@ -48,7 +48,9 @@ func TestAnthropicProvider_RealAPI(t *testing.T) {
 		t.Skip("set ANTHROPIC_API_KEY and ANTHROPIC_MODEL to run this against the real API")
 	}
 
-	p := &AnthropicProvider{APIKey: key}
+	// Optional: only needed for an API key that isn't scoped to a single
+	// workspace — see AnthropicProvider.WorkspaceID's doc comment.
+	p := &AnthropicProvider{APIKey: key, WorkspaceID: os.Getenv("ANTHROPIC_WORKSPACE_ID")}
 	resp, err := p.Complete(context.Background(), model, Request{
 		Messages:  []Message{{Role: "user", Content: "Reply with exactly the word: OK"}},
 		MaxTokens: 10,
