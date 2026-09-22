@@ -53,3 +53,8 @@ fmt:
 .PHONY: vuln
 vuln:
 	govulncheck ./...
+
+.PHONY: python-test
+python-test:
+	pip install -e "sdk/python[test]"
+	pytest sdk/python/tests

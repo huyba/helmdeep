@@ -69,3 +69,19 @@ jobs:
       # above.
       - run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
       - run: govulncheck ./...
+
+  python-sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e "sdk/python[test]"
+      # test_integration.py builds and runs the real cmd/helmdeep-gateway,
+      # cmd/dev-issuer, and cmd/mock-upstream binaries via `go build` —
+      # requires the Go toolchain above, not just Python.
+      - run: pytest sdk/python/tests

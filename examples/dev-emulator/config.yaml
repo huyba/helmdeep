@@ -1,0 +1,58 @@
+listen: ":8443"
+path: "/mcp"
+
+policy:
+  path: /etc/helmdeep/policies
+
+audit:
+  path: /data/audit.log
+
+# Real JWT identity via a local dev-issuer (cmd/dev-issuer) — DEVELOPMENT
+# AND TEST ONLY, same caveat as internal/devissuer itself: the signing key
+# is fresh and unpersisted every dev-issuer restart. This is the
+# difference from ../quickstart/config.yaml, which uses static tokens: a
+# developer here mints their own Session Identity Token per session
+# (docs/01-requirements.md FR-B3's "her own delegated identity"), instead
+# of everyone sharing the same few hardcoded tokens.
+identity:
+  jwt:
+    audience: helmdeep-dev-emulator
+    jwks_url: http://dev-issuer:8444/.well-known/jwks.json
+    exchange_url: http://dev-issuer:8444/token-exchange
+
+upstreams:
+  - name: knowledgebase
+    url: http://kb:9000/mcp
+    provenance:
+      source: knowledgebase
+      trusted: false
+  - name: suppliermaster
+    url: http://supplier:9000/mcp
+    provenance:
+      source: suppliermaster
+      trusted: true
+  - name: email
+    url: http://email:9000/mcp
+    provenance:
+      source: email
+      trusted: false
+  - name: payments
+    url: http://payments:9000/mcp
+    provenance:
+      source: payments
+      trusted: false
+
+tools:
+  - id: kb.search
+    upstream: knowledgebase
+    risk: low
+  - id: supplier.get_account
+    upstream: suppliermaster
+    risk: medium
+  - id: email.read_latest
+    upstream: email
+    risk: low
+  - id: payments.wire_transfer
+    upstream: payments
+    risk: high
+    data_classes: ["financial"]
