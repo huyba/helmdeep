@@ -1,5 +1,11 @@
 # Status: design docs vs. code
 
+**This file is always the current status**, rewritten in place as things
+change. For what the status *was* at some point in the past — and how much
+was left then — see the dated snapshots in [`docs/progress/`](docs/progress/),
+one file per report, never edited after the fact. Most recent:
+[2026-09-23 09:29 PDT](docs/progress/2026-09-23-0929.md).
+
 One row per document in `docs/00-OVERVIEW.md` through `docs/15-generation-discovery-intake.md`
 — 16 files, numbered 00–15. (If "docs 01–16" in a milestone brief meant a
 different range: this table covers all 16 numbered documents plus the two
@@ -39,3 +45,12 @@ either way.)
 Update the relevant row in the same PR that changes a status — a stale
 status table is worse than none, because it's actively misleading rather
 than just absent.
+
+Editing a row here destroys the previous answer, which is the right
+trade-off for a "what is true now" document and the wrong one for
+answering "what did we think was true in September, and how much was
+left?" That second question is what [`docs/progress/`](docs/progress/) is
+for: a new dated file per report, never an edit to an old one. Write one
+whenever it's worth being able to check back — after a milestone lands,
+before a planning decision — and add its row to
+[`docs/progress/README.md`](docs/progress/README.md) in the same commit.
