@@ -3,6 +3,12 @@
 *.test
 .DS_Store
 
+# Policy bundle signing keys (helmdeep-gateway policy keygen). The public
+# half is safe to commit, but keeping the whole directory and every *.key
+# out means following the README can't accidentally publish a private key.
+keys/
+*.key
+
 # Python (sdk/python) — build/test artifacts, never source.
 __pycache__/
 *.pyc

@@ -38,6 +38,7 @@ controls.
 | Tool Registry | **Partial** — risk rating, data classes, required scopes; undeclared-tool refusal enforced (Milestone M2) | `pkg/toolregistry` |
 | Agent Registry | **Partial** — owner, risk, data classes, optional version pin; undeclared-agent refusal enforced | `pkg/agentregistry` |
 | Model Catalog | **Partial** — approved status, data classes, residency (descriptive); unapproved-model refusal enforced | `pkg/modelcatalog` |
+| Policy Service | **Partial** — signed bundle manifests; a bundle that doesn't match is refused at load and reload; bundle version + digest recorded per action. No authoring, compilation, testing, or distribution | `pkg/policyservice` |
 | Egress control | **Partial** — per-tool upstream allowlist, cloud-metadata block (Milestone M3) | `internal/gateway`, `pkg/mcp/egress.go` |
 | Python SDK + dev emulator | **Partial** — wire-protocol client, dev-issuer binary, docker-compose emulator (Milestone M4) | `sdk/python`, `cmd/dev-issuer`, `examples/dev-emulator` |
 | Model Gateway | **Partial** — 2 real providers, policy-gated, same ledger as the Tool Gateway (Milestone M5) | `pkg/modelgw` |
@@ -230,6 +231,14 @@ for tools. See `docs/adr/0012-agent-registry.md`.
 Control Plane in doc 02 §2, gates `pkg/modelgw.Gateway` — a route's
 provider+model must be an approved entry or the call is refused. See
 `docs/adr/0013-model-catalog.md`.
+
+**`pkg/policyservice`** is the fourth, and the only one that decorates
+rather than gates: it wraps `pkg/policy.Loader` so a bundle that doesn't
+match its signed manifest is never compiled, and wraps `pkg/audit.Store`
+so every record names the bundle that decided it. It is a separate
+package from `pkg/policy` on purpose — `pkg/policy` answers "what does
+policy say about this request," and nothing about bundle provenance
+belongs on the request path. See `docs/adr/0014-policy-service.md`.
 
 `pkg/types` has no dependencies on any other package in this repo, by
 design — everything else depends on it, so it cannot depend back without

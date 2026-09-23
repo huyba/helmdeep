@@ -206,7 +206,8 @@ here rather than glossed over.
 - `pkg/mcp` — the MCP wire protocol (JSON-RPC, `_meta`, headers, transport)
 - `pkg/policy`, `pkg/audit` — the PDP and the hash-chained audit log
 - `pkg/identity` — SIT verification and the credential broker (Milestone M1); `internal/devissuer` is the dev-only issuer/exchange server it talks to
-- `pkg/modelgw`, `pkg/sandbox`, `pkg/scheduler`, `pkg/controlplane` — interface-only stubs, not implemented
+- `pkg/toolregistry`, `pkg/agentregistry`, `pkg/modelcatalog`, `pkg/policyservice` — the Control Plane services that have real, narrow implementations (see `ARCHITECTURE.md`'s component table for what each covers)
+- `pkg/sandbox`, `pkg/scheduler`, `pkg/controlplane` — interface-only stubs, not implemented
 - `internal/gateway` — the Tool Gateway's business logic
 - `cmd/helmdeep-gateway` — the product binary
 - `internal/mockupstream`, `cmd/mock-upstream` — test/demo fixtures, not part of the product

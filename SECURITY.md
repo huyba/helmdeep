@@ -47,6 +47,16 @@ As of Phase 1 (the Tool Gateway — see `ROADMAP.md`), implemented and tested:
 - Undetected retroactive tampering with the audit log: records are
   hash-chained so an edited or deleted past record breaks the chain in a way
   `verify-chain` reports.
+- Undetected modification of the policy bundle itself — when
+  `policy.signature` is configured. The bundle must match an
+  Ed25519-signed manifest covering its complete file inventory, or the
+  gateway refuses to load it, at startup and at every hot reload; adding
+  an unsigned file counts as a modification. Each action record then also
+  names the bundle version and digest that decided it. This is opt-in and
+  does nothing for a deployment that leaves it unset — see
+  `docs/adr/0014-policy-service.md` for that decision and what signing
+  does *not* cover (no trust root for the configured public key itself, no
+  key rotation or revocation, no per-session bundle pinning).
 
 ## What this project does not defend against (yet, or at all)
 

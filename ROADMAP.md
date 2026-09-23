@@ -123,9 +123,21 @@ different one. See `docs/adr/0012-agent-registry.md` for what's still
 missing (no persistent store, no owning-group/lifecycle governance from
 `docs/09-governance-trust.md` §6, no autonomy-ceiling enforcement).
 
-Three of doc 02 §2's eight Control Plane components now have a real,
+**Policy Service partially delivered ahead of this phase.**
+`pkg/policyservice` implements one of doc 02 §2's four listed Policy
+Service responsibilities — "distribution of signed policy bundles" — as
+bundle integrity at the point of consumption: an Ed25519-signed manifest
+covering a bundle's complete file inventory, refused at startup and at
+every hot reload if the bundle no longer matches, with the verified
+bundle's version and digest stamped into every Action Record so the
+ledger can say which policy decided an action and not just which rule.
+The other three (authoring, compilation, testing) are untouched, as are
+per-session bundle pinning, key rotation, and any bundle registry — see
+`docs/adr/0014-policy-service.md`.
+
+Four of doc 02 §2's eight Control Plane components now have a real,
 narrow implementation ahead of this phase's full Postgres-backed design:
-Tool Registry, Agent Registry, and Model Catalog. Policy Service, Trust
+Tool Registry, Agent Registry, Model Catalog, and Policy Service. Trust
 Engine, Approval Service, Eval Service, and Tenant/Org Service remain —
 Trust Engine deliberately not attempted as a narrow slice yet: doc 09
 §1.1 warns that a naive promotion rule is "the most likely way this

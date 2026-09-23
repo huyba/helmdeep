@@ -130,6 +130,18 @@ kubectl port-forward svc/helmdeep-tool-gateway 8443:8443
   `internal/health`.
 - **`secret.yaml` ships placeholder values.** Read its own comments before
   applying it anywhere real.
+- **The policy bundle here is unsigned.** `configmap.yaml` mounts the
+  bundle and the config omits `policy.signature`, so the gateway loads
+  whatever is in that ConfigMap and logs a warning saying so
+  (`docs/adr/0014-policy-service.md`). To sign it: run
+  `helmdeep-gateway policy sign` against a local copy of the bundle, put
+  the resulting manifest into the ConfigMap as its own key —
+  `.bundle.json` works, because the manifest is deliberately excluded from
+  the file set it covers — mount the public key (a `Secret` or ConfigMap;
+  it isn't secret), and set `policy.signature.public_key`. Re-signing is
+  then part of every policy change, which is the point: an edit applied
+  straight to the ConfigMap will be refused at the next reload instead of
+  becoming policy.
 - **Identity is `-dev-insecure` static tokens, not real verification.**
   `configmap.yaml` uses `identity.static_tokens`, which is unverifiable by
   design (see `docs/adr/0007-credential-broker-scope.md`) — that's why

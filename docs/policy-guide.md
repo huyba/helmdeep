@@ -153,6 +153,60 @@ precedence: scope is checked first (an agent outside scope is denied for
 that reason alone), then taint, then limits. See the file itself — it's
 short enough to read directly rather than duplicate here.
 
+## Signing a bundle
+
+A bundle can be signed, and a gateway can be configured to refuse one that
+doesn't match its signature — see `docs/adr/0014-policy-service.md` for
+what this does and doesn't protect. Three commands:
+
+```console
+$ helmdeep-gateway policy keygen -out-dir keys
+wrote keys/policy.key (keep this secret) and keys/policy.pub
+key id: sha256:4f1c…
+
+$ helmdeep-gateway policy sign -bundle examples/policies -key keys/policy.key -version v1
+signed bundle examples/policies version v1 (4 files, sha256:9f2c…)
+manifest: examples/policies/.bundle.json
+
+$ helmdeep-gateway policy verify -bundle examples/policies -public-key keys/policy.pub
+bundle intact: examples/policies version v1 (4 files, sha256:9f2c…)
+```
+
+The manifest defaults to `.bundle.json` *inside* the bundle — a dotfile, so
+neither OPA's loader nor the signer itself treats it as bundle content.
+Point it elsewhere with `-manifest` (and `policy.signature.manifest`) if
+the bundle directory is read-only, as it is when mounted from a ConfigMap.
+
+Then in `config.yaml`:
+
+```yaml
+policy:
+  path: examples/policies
+  signature:
+    public_key: keys/policy.pub
+    # manifest: examples/policies/.bundle.json   # the default
+```
+
+With that section present, the gateway refuses to start if the bundle
+doesn't match the manifest, refuses a `SIGHUP` reload of a bundle that was
+edited without being re-signed (the previously loaded policy stays active),
+and stamps every action record with the bundle's version and digest:
+
+```jsonc
+{
+  "decision": { "outcome": "deny", "policy_id": "scope.deny", … },
+  "policy_bundle": { "version": "v1", "digest": "sha256:9f2c…" },
+  "outcome": "denied",
+  …
+}
+```
+
+Adding a file to the bundle counts as a change: the signature covers the
+complete file inventory, not just the contents of each listed file, so an
+unsigned extra `.rego` is refused even though nothing signed was touched.
+Omitting `policy.signature` keeps the previous behavior — the bundle loads
+unverified and startup logs a warning.
+
 ## Testing a policy change
 
 `opa test examples/policies/` runs OPA's own test framework against your
