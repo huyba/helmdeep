@@ -25,6 +25,7 @@ import (
 	"github.com/huyba/helmdeep/pkg/identity"
 	"github.com/huyba/helmdeep/pkg/mcp"
 	"github.com/huyba/helmdeep/pkg/policy"
+	"github.com/huyba/helmdeep/pkg/policyservice"
 )
 
 // version is overridden at build time via -ldflags; see Makefile.
@@ -44,6 +45,8 @@ func main() {
 		err = runServe(os.Args[2:])
 	case "verify-chain":
 		err = runVerifyChain(os.Args[2:])
+	case "policy":
+		err = runPolicy(os.Args[2:])
 	default:
 		usage()
 		os.Exit(1)
@@ -60,6 +63,7 @@ func usage() {
 commands:
   serve         run the gateway (flags: -config path/to/config.yaml)
   verify-chain  verify the action record hash chain (flags: -config path/to/config.yaml)
+  policy        sign and verify policy bundles (subcommands: keygen, sign, verify)
   version       print the build version`)
 }
 
@@ -104,13 +108,43 @@ func runServe(args []string) error {
 	}
 
 	pdp := policy.NewOPADecider()
-	if err := pdp.Load(cfg.Policy.Path); err != nil {
+
+	// Policy loading goes through the Policy Service's verifying loader
+	// when policy.signature is configured: an unsigned or modified bundle
+	// is refused before it is ever compiled, at startup and on every
+	// SIGHUP below. Without that section the plain decider loads the
+	// bundle unverified — see docs/adr/0014-policy-service.md for why that
+	// remains the compatible default and what it costs.
+	policyLoader := policy.Loader(pdp)
+	var bundleRef policyservice.BundleRef
+	if sig := cfg.Policy.Signature; sig != nil {
+		pub, err := policyservice.ReadPublicKey(sig.PublicKey)
+		if err != nil {
+			return fmt.Errorf("read policy.signature.public_key: %w", err)
+		}
+		verifying := policyservice.NewVerifyingLoader(pdp, cfg.policyManifestPath(), pub)
+		policyLoader, bundleRef = verifying, verifying
+	} else {
+		slog.Warn("policy bundle is not verified: set policy.signature to refuse a bundle that does not match a signed manifest",
+			"path", cfg.Policy.Path)
+	}
+	if err := policyLoader.Load(cfg.Policy.Path); err != nil {
 		return fmt.Errorf("load policy: %w", err)
 	}
+	if bundleRef != nil {
+		active := bundleRef.Active()
+		slog.Info("policy bundle verified", "version", active.Version, "digest", active.Digest)
+	}
 
-	auditStore, err := audit.NewFileStore(cfg.Audit.Path)
+	fileStore, err := audit.NewFileStore(cfg.Audit.Path)
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
+	}
+	// With a verified bundle, every action record names the bundle version
+	// and digest that decided it — see pkg/policyservice.StampingStore.
+	auditStore := audit.Store(fileStore)
+	if bundleRef != nil {
+		auditStore = policyservice.NewStampingStore(fileStore, bundleRef)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -149,21 +183,29 @@ func runServe(args []string) error {
 	server.Mount("/livez", health.Livez())
 	server.Mount("/healthz", health.Healthz(
 		health.Check{Name: "policy", Fn: func(context.Context) error { return pdp.Ready() }},
-		health.Check{Name: "audit", Fn: auditStore.Check},
+		health.Check{Name: "audit", Fn: fileStore.Check},
 	))
 
 	// SIGHUP reloads the policy bundle without restarting the gateway or
 	// interrupting in-flight sessions — see pkg/policy.Loader and
-	// docs/adr/0002-policy-engine-choice.md.
+	// docs/adr/0002-policy-engine-choice.md. When signature verification is
+	// configured, the reload goes through it too: a bundle edited in place
+	// without being re-signed is refused here exactly as it would be at
+	// startup, and the previous policy stays active either way.
 	reload := make(chan os.Signal, 1)
 	signal.Notify(reload, syscall.SIGHUP)
 	go func() {
 		for range reload {
-			if err := pdp.Reload(); err != nil {
+			if err := policyLoader.Reload(); err != nil {
 				slog.Error("policy reload failed, previous policy remains active", "error", err)
 				continue
 			}
-			slog.Info("policy reloaded", "path", cfg.Policy.Path)
+			attrs := []any{"path", cfg.Policy.Path}
+			if bundleRef != nil {
+				active := bundleRef.Active()
+				attrs = append(attrs, "version", active.Version, "digest", active.Digest)
+			}
+			slog.Info("policy reloaded", attrs...)
 		}
 	}()
 

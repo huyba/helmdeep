@@ -12,6 +12,7 @@ import (
 
 	"github.com/huyba/helmdeep/internal/gateway"
 	"github.com/huyba/helmdeep/pkg/agentregistry"
+	"github.com/huyba/helmdeep/pkg/policyservice"
 	"github.com/huyba/helmdeep/pkg/toolregistry"
 	"github.com/huyba/helmdeep/pkg/types"
 )
@@ -34,6 +35,27 @@ type config struct {
 		// field and docs/adr/0003-fail-closed-behavior.md — a timeout is
 		// treated exactly like any other Decide error: deny.
 		DecisionTimeout string `json:"decision_timeout"`
+
+		// Signature turns on the Policy Service's bundle-integrity check
+		// (pkg/policyservice, docs/adr/0014-policy-service.md): the bundle
+		// at Path must match a manifest signed by PublicKey, or the
+		// gateway refuses to load it — at startup and on every SIGHUP
+		// reload. When set, every action record also carries the bundle
+		// version and digest that decided it.
+		//
+		// Omitting this section runs the bundle unverified, which is why
+		// startup logs a warning when it's absent: there is no key
+		// management in this repo to make signing the silent default from
+		// (no KMS, no OCI registry), so an operator has to opt in by
+		// generating a key — `helmdeep-gateway policy keygen`.
+		Signature *struct {
+			// PublicKey is a PEM Ed25519 public key file, as written by
+			// `helmdeep-gateway policy keygen`.
+			PublicKey string `json:"public_key"`
+			// Manifest defaults to <policy.path>/.bundle.json, which is
+			// where `policy sign` writes it unless told otherwise.
+			Manifest string `json:"manifest"`
+		} `json:"signature"`
 	} `json:"policy"`
 
 	Audit struct {
@@ -131,6 +153,9 @@ func loadConfig(path string) (config, error) {
 	if cfg.Audit.Path == "" {
 		return config{}, fmt.Errorf("config %s: audit.path is required", path)
 	}
+	if cfg.Policy.Signature != nil && cfg.Policy.Signature.PublicKey == "" {
+		return config{}, fmt.Errorf("config %s: policy.signature.public_key is required when policy.signature is set", path)
+	}
 	for _, u := range cfg.Upstreams {
 		if u.Name == "" || u.URL == "" {
 			return config{}, fmt.Errorf("config %s: every upstream needs a name and url", path)
@@ -158,6 +183,16 @@ func loadConfig(path string) (config, error) {
 		return config{}, fmt.Errorf("config %s: identity.jwt.jwks_url is required", path)
 	}
 	return cfg, nil
+}
+
+// policyManifestPath is where the signed bundle manifest lives: the
+// configured path if there is one, else the in-bundle default `policy sign`
+// writes to. Only meaningful when Policy.Signature is set.
+func (c config) policyManifestPath() string {
+	if c.Policy.Signature != nil && c.Policy.Signature.Manifest != "" {
+		return c.Policy.Signature.Manifest
+	}
+	return policyservice.DefaultManifestPath(c.Policy.Path)
 }
 
 // decisionTimeout parses Policy.DecisionTimeout, returning 0 (no timeout)
