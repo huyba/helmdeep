@@ -25,23 +25,31 @@ import (
 // exactly ActionRecord's field order, and Go's encoding/json sorts map keys
 // alphabetically, so the same record always hashes to the same value
 // regardless of which process computed it.
+//
+// PolicyBundle is a pointer with omitempty for a reason that matters to
+// this function specifically: a record written without one (by a
+// deployment that doesn't verify signed bundles, or before this field
+// existed at all) marshals to exactly the bytes it always did, so chains
+// written by earlier builds still verify against this code.
 type hashable struct {
-	Timestamp time.Time              `json:"timestamp"`
-	Subject   types.Subject          `json:"subject"`
-	Action    types.Action           `json:"action"`
-	Decision  types.DecisionResponse `json:"decision"`
-	Outcome   types.RecordOutcome    `json:"outcome"`
-	PrevHash  string                 `json:"prev_hash"`
+	Timestamp    time.Time              `json:"timestamp"`
+	Subject      types.Subject          `json:"subject"`
+	Action       types.Action           `json:"action"`
+	Decision     types.DecisionResponse `json:"decision"`
+	Outcome      types.RecordOutcome    `json:"outcome"`
+	PolicyBundle *types.PolicyBundleRef `json:"policy_bundle,omitempty"`
+	PrevHash     string                 `json:"prev_hash"`
 }
 
 func computeHash(rec types.ActionRecord) (string, error) {
 	h := hashable{
-		Timestamp: rec.Timestamp,
-		Subject:   rec.Subject,
-		Action:    rec.Action,
-		Decision:  rec.Decision,
-		Outcome:   rec.Outcome,
-		PrevHash:  rec.PrevHash,
+		Timestamp:    rec.Timestamp,
+		Subject:      rec.Subject,
+		Action:       rec.Action,
+		Decision:     rec.Decision,
+		Outcome:      rec.Outcome,
+		PolicyBundle: rec.PolicyBundle,
+		PrevHash:     rec.PrevHash,
 	}
 	b, err := json.Marshal(h)
 	if err != nil {
